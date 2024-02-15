@@ -1,0 +1,7 @@
+CompileFlags:
+  Add: -DABUILD_IMPLEMENTATION
+
+Diagnostics:
+  # Remove: -Wmacro-redefined
+  ClangTidy: 
+    Remove: misc-definitions-in-headers 
