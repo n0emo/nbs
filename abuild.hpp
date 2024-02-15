@@ -10,6 +10,7 @@
 #include <vector>
 
 #define ABUILDAPI static inline
+#define TODO(thing) assert(0 && thing "is not implemented.")
 
 namespace ab
 {
@@ -20,6 +21,7 @@ struct Cmd
     strvec items;
     void append(std::string item);
     void append_many(strvec items);
+    void append_many_prefixed(std::string prefix, strvec items);
     std::string to_string();
     int run();       // TODO: make better than system from cstdlib
     int run_async(); // TODO
@@ -52,30 +54,36 @@ namespace ab::c
 enum Compiler
 {
     CC,
+    CXX,
     GCC,
+    GXX,
     CLANG,
+    MSVC,
 };
 
-class ObjectTarget
+ABUILDAPI constexpr std::string comp_str(Compiler comp);
+ABUILDAPI constexpr Compiler current_compiler();
+ABUILDAPI Compiler get_default_compiler();
+ABUILDAPI void set_default_compiler(Compiler compiler);
+
+struct CompileOptions
 {
-  private:
-    Compiler compiler = CC;
-    strvec flags;
-    strvec include_paths;
-    std::string source;
-    strvec defines;
+    Compiler compiler = get_default_compiler();
+    std::string standard;
+    strvec flags = {};
+    strvec include_paths = {};
+    strvec libs = {};
+    strvec lib_paths = {};
+    strvec defines = {};
+    strvec other_flags = {};
 
-  public:
-    Cmd cmd();
-    ObjectTarget(std::string source);
-    ObjectTarget(std::string source, Compiler compiler, strvec flags, strvec include_paths, strvec defines);
-    void set_compiler(Compiler compiler);
-    void set_flags(strvec flags);
-    void set_include_paths(strvec paths); // TODO: consider path class
-    void set_defines(strvec defines);
+    Cmd cmd(strvec sources, strvec additional_flags = {});
+    Cmd exe_cmd(std::string output, strvec sources);
+    Cmd obj_cmd(std::string source);
+    Cmd static_lib_cmd(strvec sources);
+    Cmd dynamic_lib_cmd(strvec sources);
 };
 
-ABUILDAPI std::string comp_str(Compiler comp);
 } // namespace ab::c
 
 // -------------------------------
@@ -98,6 +106,14 @@ void Cmd::append_many(strvec items)
     for (auto item : items)
     {
         append(item);
+    }
+}
+
+void Cmd::append_many_prefixed(std::string prefix, strvec items)
+{
+    for (auto item : items)
+    {
+        append(prefix + item);
     }
 }
 
@@ -210,75 +226,97 @@ ABUILDAPI void error(std::string message)
 
 namespace ab::c
 {
+Compiler default_compiler = current_compiler();
 
-Cmd ObjectTarget::cmd()
-{
-    Cmd cmd;
-
-    cmd.append(comp_str(compiler));
-    cmd.append_many(flags);
-    for (const auto &path : include_paths)
-    {
-        cmd.append(std::string("-I") + path);
-    }
-    cmd.append("-c");
-    cmd.append(source);
-    for (const auto &path : defines)
-    {
-        cmd.append(std::string("-D") + path);
-    }
-
-    return cmd;
-}
-
-ObjectTarget::ObjectTarget(std::string source)
-{
-    this->source = source;
-}
-
-ObjectTarget::ObjectTarget(std::string source, Compiler compiler, strvec flags, strvec include_paths, strvec defines)
-{
-    this->source = source;
-    this->compiler = compiler;
-    this->flags = flags;
-    this->include_paths = include_paths;
-    this->defines = defines;
-}
-
-void ObjectTarget::set_compiler(Compiler compiler)
-{
-    this->compiler = compiler;
-}
-
-void ObjectTarget::set_flags(strvec flags)
-{
-    this->flags = flags;
-}
-
-void ObjectTarget::set_include_paths(strvec paths)
-{
-    this->include_paths = paths;
-}
-
-void ObjectTarget::set_defines(strvec defines)
-{
-    this->defines = defines;
-}
-
-ABUILDAPI std::string comp_str(Compiler comp)
+ABUILDAPI constexpr std::string comp_str(Compiler comp)
 {
     switch (comp)
     {
     case CC:
         return "cc";
+    case CXX:
+        return "c++";
     case GCC:
         return "gcc";
+    case GXX:
+        return "g++";
     case CLANG:
         return "clang";
+    case MSVC:
+        TODO("msvc");
     default:
         return "UNKNOWN COMPILER";
     }
 }
+
+ABUILDAPI constexpr Compiler current_compiler()
+{
+//  Clang C++ emulates GCC, so it has to appear early.
+#if defined __clang__ && !defined(__ibmxl__) && !defined(__CODEGEARC__)
+    return CLANG;
+
+//  GNU C++:
+#elif defined(__GNUC__) && !defined(__ibmxl__)
+    return GXX;
+
+//  Microsoft Visual C++
+#elif defined _MSC_VER
+    return MSVC;
+#endif
+
+    TODO("Unknown compiler");
+}
+
+ABUILDAPI Compiler get_default_compiler()
+{
+    return default_compiler;
+}
+
+ABUILDAPI void set_default_compiler(Compiler compiler);
+
+Cmd CompileOptions::cmd(strvec sources, strvec additional_flags)
+{
+    Cmd cmd;
+
+    cmd.append(comp_str(compiler));
+    if (!standard.empty())
+        cmd.append("-std=" + standard);
+
+    cmd.append_many(flags);
+    cmd.append_many_prefixed("-I", include_paths);
+    cmd.append_many_prefixed("-l", libs);
+    cmd.append_many_prefixed("-L", lib_paths);
+    cmd.append_many_prefixed("-D", defines);
+    cmd.append_many(other_flags);
+
+    cmd.append_many(additional_flags);
+    cmd.append_many(sources);
+
+    return cmd;
+}
+
+Cmd CompileOptions::exe_cmd(std::string output, strvec sources)
+{
+    return this->cmd(sources, {"-o", output});
+}
+
+Cmd CompileOptions::obj_cmd(std::string source)
+{
+    return this->cmd({source}, {"-c"});
+}
+
+Cmd static_lib_cmd(strvec sources)
+{
+    (void)sources;
+    TODO("static_lib_cmd");
+}
+
+Cmd dynamic_lib_cmd(strvec sources)
+{
+    (void)sources;
+    TODO("static_lib_cmd");
+}
+
 } // namespace ab::c
 
 #endif // ABUILD_IMPLEMENTATION
