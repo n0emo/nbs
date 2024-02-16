@@ -18,22 +18,28 @@ typedef std::vector<std::string> strvec;
 
 struct Cmd
 {
+    strvec items;
+
     Cmd();
     Cmd(const std::string &cmd);
     Cmd(const strvec &cmd);
-    strvec items;
-    void append(std::string item);
-    void append_many(strvec items);
-    void append_many_prefixed(std::string prefix, strvec items);
-    std::string to_string();
+
+    void append(const std::string &item);
+    void append_many(const strvec &items);
+    void append_many_prefixed(const std::string &prefix, const strvec &items);
+
+    std::string to_string() const;
     int run();       // TODO: make better than system from cstdlib
     int run_async(); // TODO
-    void run_or_die(std::string message);
+    void run_or_die(const std::string &message);
 };
 
 // GO_REBUILD_YOURSELF TECHNOLOGY (TM Amista Azozin)
 ABUILDAPI void self_update(int argc, char **argv, std::string source);
-ABUILDAPI long compare_last_mod_time(std::string path1, std::string path2);
+ABUILDAPI long compare_last_mod_time(const std::string &path1, const std::string &path2);
+ABUILDAPI std::string string_join(const std::string &sep, const strvec &strings);
+ABUILDAPI std::string path(const strvec &path);
+ABUILDAPI bool make_directory_if_not_exists(const std::string &path);
 }; // namespace ab
 
 namespace ab::log
@@ -112,13 +118,13 @@ Cmd::Cmd(const strvec &cmd)
     append_many(cmd);
 }
 
-void Cmd::append(std::string item)
+void Cmd::append(const std::string &item)
 {
     // TODO: escape item
     items.emplace_back(item);
 }
 
-void Cmd::append_many(strvec items)
+void Cmd::append_many(const strvec &items)
 {
     for (auto item : items)
     {
@@ -126,7 +132,7 @@ void Cmd::append_many(strvec items)
     }
 }
 
-void Cmd::append_many_prefixed(std::string prefix, strvec items)
+void Cmd::append_many_prefixed(const std::string &prefix, const strvec &items)
 {
     for (auto item : items)
     {
@@ -134,7 +140,7 @@ void Cmd::append_many_prefixed(std::string prefix, strvec items)
     }
 }
 
-std::string Cmd::to_string()
+std::string Cmd::to_string() const
 {
     if (items.empty())
         return "";
@@ -156,7 +162,7 @@ int Cmd::run()
     return system(cmd.c_str());
 }
 
-void Cmd::run_or_die(std::string message)
+void Cmd::run_or_die(const std::string &message)
 {
     int result = run();
     if (result != 0)
@@ -191,12 +197,45 @@ ABUILDAPI void self_update(int argc, char **argv, std::string source)
 
     exit(0);
 }
-ABUILDAPI long compare_last_mod_time(std::string path1, std::string path2)
+ABUILDAPI long compare_last_mod_time(const std::string &path1, const std::string &path2)
 {
     auto time1 = std::filesystem::last_write_time(path1);
     auto time2 = std::filesystem::last_write_time(path2);
     auto diff = time1 - time2;
     return diff.count();
+}
+
+ABUILDAPI std::string string_join(const std::string &sep, const strvec &strings)
+{
+    if (strings.empty())
+        return "";
+
+    if (strings.size() == 1)
+        return strings[0];
+
+    std::stringstream ss;
+    for (size_t i = 0; i < strings.size() - 1; i++)
+    {
+        ss << strings[i];
+        ss << sep;
+    }
+    ss << strings.back();
+
+    return ss.str();
+}
+
+ABUILDAPI std::string path(const strvec &path)
+{
+#ifdef __WIN32
+    return string_join("\\", path);
+#else
+    return string_join("/", path);
+#endif
+}
+
+ABUILDAPI bool make_directory_if_not_exists(const std::string &path)
+{
+    return std::filesystem::create_directory(path);
 }
 
 } // namespace ab
