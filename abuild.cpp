@@ -4,33 +4,36 @@
 using namespace ab;
 using namespace log;
 
-strvec flags{"-Wall", "-Wextra", "-pedantic"};
-strvec include_paths{"."};
-c::Compiler compiler = c::GXX;
-
-void compile_object_file(std::string file, strvec defines = {})
+void build()
 {
-    c::CompileOptions options{.compiler = compiler, .flags = flags, .include_paths = include_paths, .defines = defines};
-    options.obj_cmd(file).run_or_die("Error during compilation");
-}
-
-void compile_executable(std::string file)
-{
-    c::CompileOptions options{.compiler = compiler};
-    options.exe_cmd("hello", {"hello.o"}).run_or_die("Error during compilation");
+    c::CompileOptions options{
+        .compiler = c::GXX,
+        .flags = {"-Wall", "-Wextra", "-pedantic"},
+        .include_paths = {"."},
+    };
+    options.obj_cmd("hello.cpp").run_or_die("Error compiling hello.o");
+    options.exe_cmd("hello", {"hello.o"}).run_or_die("Error compiling hello");
 }
 
 int main(int argc, char **argv)
 {
     self_update(argc, argv, __FILE__);
+    info("Starting build");
 
-    info("Hello from Abuild");
-
-    compile_object_file("hello.cpp");
-    compile_object_file("abuild.hpp", {"ABUILD_IMPLEMENTATION"});
-    compile_executable("hello.o");
-
-    info("Compilation successful");
+    std::string subcommand;
+    if (argc == 1 || (subcommand = argv[1]) == "build")
+    {
+        build();
+    }
+    else if (subcommand == "clean")
+    {
+        Cmd({"rm", "-f", "*.o", "hello"}).run_or_die("Error cleaning directory");
+    }
+    else if (subcommand == "run")
+    {
+        build();
+        Cmd("./hello").run_or_die("Error executing hello");
+    }
 
     return 0;
 }

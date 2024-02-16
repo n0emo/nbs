@@ -18,6 +18,9 @@ typedef std::vector<std::string> strvec;
 
 struct Cmd
 {
+    Cmd();
+    Cmd(const std::string &cmd);
+    Cmd(const strvec &cmd);
     strvec items;
     void append(std::string item);
     void append_many(strvec items);
@@ -61,8 +64,8 @@ enum Compiler
     MSVC,
 };
 
-ABUILDAPI constexpr std::string comp_str(Compiler comp);
-ABUILDAPI constexpr Compiler current_compiler();
+ABUILDAPI std::string comp_str(Compiler comp);
+ABUILDAPI Compiler current_compiler();
 ABUILDAPI Compiler get_default_compiler();
 ABUILDAPI void set_default_compiler(Compiler compiler);
 
@@ -95,6 +98,20 @@ struct CompileOptions
 
 namespace ab
 {
+Cmd::Cmd()
+{
+}
+
+Cmd::Cmd(const std::string &cmd)
+{
+    append(cmd);
+}
+
+Cmd::Cmd(const strvec &cmd)
+{
+    append_many(cmd);
+}
+
 void Cmd::append(std::string item)
 {
     // TODO: escape item
@@ -151,21 +168,25 @@ void Cmd::run_or_die(std::string message)
 
 ABUILDAPI void self_update(int argc, char **argv, std::string source)
 {
-    log::info("Updating");
     assert(argc > 0);
     std::string exe(argv[0]);
 
     if (compare_last_mod_time(source, exe) < 0)
         return;
 
+    log::info("Updating");
     std::filesystem::rename(exe, exe + ".old");
     {
         Cmd cmd;
-        cmd.append_many({"c++", source, "-o", exe});
+        cmd.append_many({c::comp_str(c::current_compiler()), source, "-o", exe});
         cmd.run_or_die("Error during self_update!!!");
     }
     Cmd cmd;
     cmd.append(exe);
+    for (size_t i = 1; i < argc; i++)
+    {
+        cmd.append(argv[i]);
+    }
     cmd.run();
 
     exit(0);
@@ -228,7 +249,7 @@ namespace ab::c
 {
 Compiler default_compiler = current_compiler();
 
-ABUILDAPI constexpr std::string comp_str(Compiler comp)
+ABUILDAPI std::string comp_str(Compiler comp)
 {
     switch (comp)
     {
@@ -249,7 +270,7 @@ ABUILDAPI constexpr std::string comp_str(Compiler comp)
     }
 }
 
-ABUILDAPI constexpr Compiler current_compiler()
+ABUILDAPI Compiler current_compiler()
 {
 //  Clang C++ emulates GCC, so it has to appear early.
 #if defined __clang__ && !defined(__ibmxl__) && !defined(__CODEGEARC__)
@@ -272,7 +293,10 @@ ABUILDAPI Compiler get_default_compiler()
     return default_compiler;
 }
 
-ABUILDAPI void set_default_compiler(Compiler compiler);
+ABUILDAPI void set_default_compiler(Compiler compiler)
+{
+    default_compiler = compiler;
+}
 
 Cmd CompileOptions::cmd(strvec sources, strvec additional_flags)
 {
