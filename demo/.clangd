@@ -1,0 +1,6 @@
+CompileFlags:
+  Add: [-Iinclude, -DABUILD_IMPLEMENTATION, -Wno-macro-redefined]
+
+Diagnostics:
+  ClangTidy: 
+    Remove: misc-definitions-in-headers

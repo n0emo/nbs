@@ -11,7 +11,7 @@ void build()
         .flags = {"-Wall", "-Wextra", "-pedantic"},
         .include_paths = {"."},
     };
-    options.obj_cmd("hello.cpp").run_or_die("Error compiling hello.o");
+    options.obj_cmd("hello.cpp", "hello.o").run_or_die("Error compiling hello.o");
     options.exe_cmd("hello", {"hello.o"}).run_or_die("Error compiling hello");
 }
 

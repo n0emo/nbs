@@ -1,5 +1,5 @@
 CompileFlags:
-  Add: [-std=c++20, -DABUILD_IMPLEMENTATION]
+  Add: [-DABUILD_IMPLEMENTATION]
 
 Diagnostics:
   # Remove: -Wmacro-redefined

@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #define ABUILDAPI static inline
@@ -15,6 +16,13 @@
 namespace ab
 {
 typedef std::vector<std::string> strvec;
+
+const std::string os_path_sep =
+#ifdef _WIN32
+    "\\";
+#else
+    "/";
+#endif
 
 struct Cmd
 {
@@ -29,17 +37,53 @@ struct Cmd
     void append_many_prefixed(const std::string &prefix, const strvec &items);
 
     std::string to_string() const;
-    int run();       // TODO: make better than system from cstdlib
-    int run_async(); // TODO
-    void run_or_die(const std::string &message);
+    int run() const;       // TODO: make better than system from cstdlib
+    int run_async() const; // TODO
+    void run_or_die(const std::string &message) const;
 };
 
-// GO_REBUILD_YOURSELF TECHNOLOGY (TM Amista Azozin)
 ABUILDAPI void self_update(int argc, char **argv, std::string source);
 ABUILDAPI long compare_last_mod_time(const std::string &path1, const std::string &path2);
 ABUILDAPI std::string string_join(const std::string &sep, const strvec &strings);
 ABUILDAPI std::string path(const strvec &path);
 ABUILDAPI bool make_directory_if_not_exists(const std::string &path);
+ABUILDAPI std::string trim_to(const std::string &str, const std::string &chars = "\n\r ");
+ABUILDAPI std::string trim_right_to(const std::string &str, const std::string &chars = "\n\r ");
+ABUILDAPI std::string trim_left_to(const std::string &str, const std::string &chars = "\n\r ");
+ABUILDAPI strvec split(const std::string &str, const std::string &delim);
+ABUILDAPI std::string change_extension(const std::string &file, const std::string &new_extension);
+
+struct Defaults
+{
+    std::string build_path = "";
+};
+ABUILDAPI Defaults *get_defaults();
+
+struct Target
+{
+    std::string output;
+    strvec dependencies;
+    std::vector<Cmd> cmds;
+
+    Target(const std::string &output, const Cmd &cmd, const strvec &dependencies = {});
+    Target(const std::string &output, const std::vector<Cmd> &cmds, const strvec &dependencies = {});
+
+    int build();
+};
+
+struct TargetMap
+{
+    std::unordered_map<std::string, Target> targets;
+
+    TargetMap() = default;
+
+    void insert(Target &target);
+    bool remove(const std::string &target);
+    int build(const std::string &output);
+    int build_if_needs(const std::string &output);
+    bool needs_rebuild(const std::string &output);
+};
+
 }; // namespace ab
 
 namespace ab::log
@@ -72,23 +116,35 @@ enum Compiler
 
 ABUILDAPI std::string comp_str(Compiler comp);
 ABUILDAPI Compiler current_compiler();
-ABUILDAPI Compiler get_default_compiler();
-ABUILDAPI void set_default_compiler(Compiler compiler);
+
+struct CDefaults
+{
+    Compiler compiler = CXX;
+    std::string standard;
+    strvec flags;
+    strvec include_paths;
+    strvec libs;
+    strvec lib_paths;
+    strvec defines;
+    strvec other_flags;
+};
+
+ABUILDAPI CDefaults *get_cdefaults();
 
 struct CompileOptions
 {
-    Compiler compiler = get_default_compiler();
-    std::string standard;
-    strvec flags = {};
-    strvec include_paths = {};
-    strvec libs = {};
-    strvec lib_paths = {};
-    strvec defines = {};
-    strvec other_flags = {};
+    Compiler compiler = get_cdefaults()->compiler;
+    std::string standard = get_cdefaults()->standard;
+    strvec flags = get_cdefaults()->flags;
+    strvec include_paths = get_cdefaults()->include_paths;
+    strvec libs = get_cdefaults()->libs;
+    strvec lib_paths = get_cdefaults()->lib_paths;
+    strvec defines = get_cdefaults()->defines;
+    strvec other_flags = get_cdefaults()->other_flags;
 
     Cmd cmd(strvec sources, strvec additional_flags = {});
     Cmd exe_cmd(std::string output, strvec sources);
-    Cmd obj_cmd(std::string source);
+    Cmd obj_cmd(std::string output, std::string source);
     Cmd static_lib_cmd(strvec sources);
     Cmd dynamic_lib_cmd(strvec sources);
 };
@@ -104,6 +160,12 @@ struct CompileOptions
 
 namespace ab
 {
+static Defaults defaults;
+ABUILDAPI Defaults *get_defaults()
+{
+    return &defaults;
+}
+
 Cmd::Cmd()
 {
 }
@@ -120,7 +182,6 @@ Cmd::Cmd(const strvec &cmd)
 
 void Cmd::append(const std::string &item)
 {
-    // TODO: escape item
     items.emplace_back(item);
 }
 
@@ -142,6 +203,7 @@ void Cmd::append_many_prefixed(const std::string &prefix, const strvec &items)
 
 std::string Cmd::to_string() const
 {
+    // TODO: escape item
     if (items.empty())
         return "";
 
@@ -155,14 +217,14 @@ std::string Cmd::to_string() const
     return ss.str();
 }
 
-int Cmd::run()
+int Cmd::run() const
 {
     std::string cmd = to_string();
     std::cout << cmd << '\n';
     return system(cmd.c_str());
 }
 
-void Cmd::run_or_die(const std::string &message)
+void Cmd::run_or_die(const std::string &message) const
 {
     int result = run();
     if (result != 0)
@@ -238,6 +300,171 @@ ABUILDAPI bool make_directory_if_not_exists(const std::string &path)
     return std::filesystem::create_directory(path);
 }
 
+ABUILDAPI std::string trim_to(const std::string &str, const std::string &chars)
+{
+    return trim_right_to(trim_left_to(str));
+}
+
+ABUILDAPI std::string trim_right_to(const std::string &str, const std::string &chars)
+{
+    size_t count = str.size();
+    while (count > 0 && chars.find(str[count - 1]) == std::string::npos)
+    {
+        count--;
+    }
+    return str.substr(0, count);
+}
+
+ABUILDAPI std::string trim_left_to(const std::string &str, const std::string &chars)
+{
+    size_t index = 0;
+    while (index < str.size() && chars.find(str[index]) == std::string::npos)
+    {
+        index++;
+    }
+    return str.substr(index);
+}
+
+ABUILDAPI strvec split(const std::string &str, const std::string &delim)
+{
+    if (str.empty())
+        return {""};
+
+    strvec result;
+    size_t index = 0;
+    size_t count = 0;
+
+    for (size_t i = 0; i < str.size(); i++)
+    {
+        char c = str[i];
+        if (delim.find(c) == std::string::npos)
+        {
+            count++;
+        }
+        else
+        {
+            result.emplace_back(str.substr(index, count));
+            index = i + 1;
+            count = 0;
+        }
+    }
+    result.emplace_back(str.substr(index, count));
+
+    return result;
+}
+
+ABUILDAPI std::string change_extension(const std::string &file, const std::string &new_extension)
+{
+    return trim_right_to(file, ".") + new_extension;
+}
+
+Target::Target(const std::string &output, const Cmd &cmd, const strvec &dependencies)
+    : output(output), cmds({cmd}), dependencies(dependencies)
+{
+}
+Target::Target(const std::string &output, const std::vector<Cmd> &cmds, const strvec &dependencies)
+    : output(output), cmds(cmds), dependencies(dependencies)
+{
+}
+
+int Target::build()
+{
+    for (const auto cmd : cmds)
+    {
+        int result = cmd.run();
+        if (result != 0)
+            return result;
+    }
+    return 0;
+}
+
+void TargetMap::insert(Target &target)
+{
+    targets.insert({target.output, target});
+}
+bool TargetMap::remove(const std::string &target_output)
+{
+    return targets.erase(target_output) > 0;
+}
+int TargetMap::build(const std::string &output)
+{
+    auto target_it = targets.find(output);
+    if (target_it == targets.end())
+        return 1;
+    auto target = target_it->second;
+
+    for (const auto &dep : target.dependencies)
+    {
+        if (targets.find(dep) != targets.end())
+        {
+            int result = build(dep);
+            if (result != 0)
+                return result;
+        }
+        else if (!std::filesystem::exists(dep))
+        {
+            return 1;
+        }
+    }
+
+    for (const auto &cmd : target.cmds)
+    {
+        int result = cmd.run();
+        if (result != 0)
+            return result;
+    }
+    return 0;
+}
+int TargetMap::build_if_needs(const std::string &output)
+{
+    if (!needs_rebuild(output))
+        return 0;
+
+    auto target = targets.find(output)->second;
+
+    for (const auto &dep : target.dependencies)
+    {
+        if (targets.find(dep) != targets.end())
+        {
+            int result = build_if_needs(dep);
+            if (result != 0)
+                return result;
+        }
+        else if (!std::filesystem::exists(dep))
+        {
+            return 1;
+        }
+    }
+
+    for (const auto &cmd : target.cmds)
+    {
+        int result = cmd.run();
+        if (result != 0)
+            return result;
+    }
+    return 0;
+}
+bool TargetMap::needs_rebuild(const std::string &output)
+{
+    if (!std::filesystem::exists(output))
+        return true;
+
+    auto target_it = targets.find(output);
+    if (target_it == targets.end())
+        TODO("needs_rebuild error handling");
+    auto target = target_it->second;
+
+    for (const auto &dep : target.dependencies)
+    {
+        if ((targets.find(dep) != targets.end() && needs_rebuild(dep)) ||
+            (targets.find(dep) != targets.end() && !std::filesystem::exists(dep) ||
+             (std::filesystem::exists(dep) && compare_last_mod_time(output, dep) < 0)))
+        {
+            return true;
+        }
+    }
+    return false;
+}
 } // namespace ab
 
 namespace ab::log
@@ -286,7 +513,7 @@ ABUILDAPI void error(std::string message)
 
 namespace ab::c
 {
-Compiler default_compiler = current_compiler();
+static CDefaults cdefaults;
 
 ABUILDAPI std::string comp_str(Compiler comp)
 {
@@ -327,14 +554,9 @@ ABUILDAPI Compiler current_compiler()
     TODO("Unknown compiler");
 }
 
-ABUILDAPI Compiler get_default_compiler()
+ABUILDAPI CDefaults *get_cdefaults()
 {
-    return default_compiler;
-}
-
-ABUILDAPI void set_default_compiler(Compiler compiler)
-{
-    default_compiler = compiler;
+    return &cdefaults;
 }
 
 Cmd CompileOptions::cmd(strvec sources, strvec additional_flags)
@@ -363,9 +585,9 @@ Cmd CompileOptions::exe_cmd(std::string output, strvec sources)
     return this->cmd(sources, {"-o", output});
 }
 
-Cmd CompileOptions::obj_cmd(std::string source)
+Cmd CompileOptions::obj_cmd(std::string output, std::string source)
 {
-    return this->cmd({source}, {"-c"});
+    return this->cmd({source}, {"-c", "-o", output});
 }
 
 Cmd static_lib_cmd(strvec sources)
