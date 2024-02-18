@@ -10,19 +10,31 @@
 #include <unordered_map>
 #include <vector>
 
+#ifdef _WIN32
+#error Windows is not implemented
+#else
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
 #define ABUILDAPI static inline
 #define TODO(thing) assert(0 && thing "is not implemented.")
+#define UNREACHABLE assert(0 && "UNREACHABLE")
 
 namespace ab
 {
 typedef std::vector<std::string> strvec;
 
-const std::string os_path_sep =
-#ifdef _WIN32
-    "\\";
-#else
-    "/";
-#endif
+const std::string os_path_sep = "/";
+
+struct Process
+{
+    int pid;
+
+    Process(int pid);
+
+    bool await() const;
+};
 
 struct Cmd
 {
@@ -37,27 +49,16 @@ struct Cmd
     void append_many_prefixed(const std::string &prefix, const strvec &items);
 
     std::string to_string() const;
-    int run() const;       // TODO: make better than system from cstdlib
-    int run_async() const; // TODO
+    int run() const; // TODO: make better than system from cstdlib
+    Process run_async() const;
     void run_or_die(const std::string &message) const;
+    std::unique_ptr<char *[]> to_c_argv() const;
 };
-
-ABUILDAPI void self_update(int argc, char **argv, std::string source);
-ABUILDAPI long compare_last_mod_time(const std::string &path1, const std::string &path2);
-ABUILDAPI std::string string_join(const std::string &sep, const strvec &strings);
-ABUILDAPI std::string path(const strvec &path);
-ABUILDAPI bool make_directory_if_not_exists(const std::string &path);
-ABUILDAPI std::string trim_to(const std::string &str, const std::string &chars = "\n\r ");
-ABUILDAPI std::string trim_right_to(const std::string &str, const std::string &chars = "\n\r ");
-ABUILDAPI std::string trim_left_to(const std::string &str, const std::string &chars = "\n\r ");
-ABUILDAPI strvec split(const std::string &str, const std::string &delim);
-ABUILDAPI std::string change_extension(const std::string &file, const std::string &new_extension);
 
 struct Defaults
 {
     std::string build_path = "";
 };
-ABUILDAPI Defaults *get_defaults();
 
 struct Target
 {
@@ -70,6 +71,19 @@ struct Target
 
     int build();
 };
+
+ABUILDAPI bool await_processes(const std::vector<Process> &processes);
+ABUILDAPI Defaults *get_defaults();
+ABUILDAPI void self_update(int argc, char **argv, std::string source);
+ABUILDAPI long compare_last_mod_time(const std::string &path1, const std::string &path2);
+ABUILDAPI std::string string_join(const std::string &sep, const strvec &strings);
+ABUILDAPI std::string path(const strvec &path);
+ABUILDAPI bool make_directory_if_not_exists(const std::string &path);
+ABUILDAPI std::string trim_to(const std::string &str, const std::string &chars = "\n\r ");
+ABUILDAPI std::string trim_right_to(const std::string &str, const std::string &chars = "\n\r ");
+ABUILDAPI std::string trim_left_to(const std::string &str, const std::string &chars = "\n\r ");
+ABUILDAPI strvec split(const std::string &str, const std::string &delim);
+ABUILDAPI std::string change_extension(const std::string &file, const std::string &new_extension);
 
 struct TargetMap
 {
@@ -114,9 +128,6 @@ enum Compiler
     MSVC,
 };
 
-ABUILDAPI std::string comp_str(Compiler comp);
-ABUILDAPI Compiler current_compiler();
-
 struct CDefaults
 {
     Compiler compiler = CXX;
@@ -130,7 +141,6 @@ struct CDefaults
 };
 
 ABUILDAPI CDefaults *get_cdefaults();
-
 struct CompileOptions
 {
     Compiler compiler = get_cdefaults()->compiler;
@@ -149,6 +159,9 @@ struct CompileOptions
     Cmd dynamic_lib_cmd(strvec sources);
 };
 
+ABUILDAPI std::string comp_str(Compiler comp);
+ABUILDAPI Compiler current_compiler();
+
 } // namespace ab::c
 
 // -------------------------------
@@ -161,6 +174,49 @@ struct CompileOptions
 namespace ab
 {
 static Defaults defaults;
+
+Process::Process(int pid) : pid(pid)
+{
+}
+
+bool Process::await() const
+{
+    while (true)
+    {
+        int status = 0;
+        if (waitpid(pid, &status, 0) < 0)
+        {
+            TODO("waitpit error handling");
+        }
+
+        if (WIFEXITED(status))
+        {
+            int exit_status = WEXITSTATUS(status);
+            return exit_status == 0;
+            // TODO: error message
+        }
+
+        if (WIFSIGNALED(status))
+        {
+            return false;
+            // TODO: error message
+        }
+    }
+}
+
+ABUILDAPI bool await_processes(const std::vector<Process> &processes)
+{
+    bool result = true;
+    for (const auto &proc : processes)
+    {
+        if (!proc.await())
+        {
+            result = false;
+        }
+    }
+    return result;
+}
+
 ABUILDAPI Defaults *get_defaults()
 {
     return &defaults;
@@ -219,9 +275,25 @@ std::string Cmd::to_string() const
 
 int Cmd::run() const
 {
-    std::string cmd = to_string();
-    std::cout << cmd << '\n';
-    return system(cmd.c_str());
+    return run_async().await();
+}
+
+Process Cmd::run_async() const
+{
+    std::cout << to_string() << '\n';
+    int p = fork();
+    if (p < 0)
+    {
+        TODO("run async error handling");
+    }
+    else if (p == 0)
+    {
+        auto args = to_c_argv();
+        execvp(args[0], args.get());
+        TODO("error handling of execvp");
+    }
+
+    return p;
 }
 
 void Cmd::run_or_die(const std::string &message) const
@@ -232,6 +304,17 @@ void Cmd::run_or_die(const std::string &message) const
         ab::log::error(message);
         exit(result);
     }
+}
+
+std::unique_ptr<char *[]> Cmd::to_c_argv() const
+{
+    auto result = std::make_unique<char *[]>(items.size() + 1);
+    for (size_t i = 0; i < items.size(); i++)
+    {
+        result[i] = (char *)items[i].c_str();
+    }
+    result[items.size()] = NULL;
+    return std::move(result);
 }
 
 ABUILDAPI void self_update(int argc, char **argv, std::string source)
