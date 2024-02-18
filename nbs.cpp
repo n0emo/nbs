@@ -1,7 +1,7 @@
 #define ABUILD_IMPLEMENTATION
-#include "abuild.hpp"
+#include "nbs.hpp"
 
-using namespace ab;
+using namespace nbs;
 using namespace log;
 
 void build()

@@ -21,7 +21,7 @@
 #define TODO(thing) assert(0 && thing "is not implemented.")
 #define UNREACHABLE assert(0 && "UNREACHABLE")
 
-namespace ab
+namespace nbs
 {
 typedef std::vector<std::string> strvec;
 
@@ -49,7 +49,7 @@ struct Cmd
     void append_many_prefixed(const std::string &prefix, const strvec &items);
 
     std::string to_string() const;
-    int run() const; // TODO: make better than system from cstdlib
+    bool run() const; // TODO: make better than system from cstdlib
     Process run_async() const;
     void run_or_die(const std::string &message) const;
     std::unique_ptr<char *[]> to_c_argv() const;
@@ -69,7 +69,7 @@ struct Target
     Target(const std::string &output, const Cmd &cmd, const strvec &dependencies = {});
     Target(const std::string &output, const std::vector<Cmd> &cmds, const strvec &dependencies = {});
 
-    int build();
+    bool build();
 };
 
 ABUILDAPI bool await_processes(const std::vector<Process> &processes);
@@ -93,14 +93,14 @@ struct TargetMap
 
     void insert(Target &target);
     bool remove(const std::string &target);
-    int build(const std::string &output);
-    int build_if_needs(const std::string &output);
+    bool build(const std::string &output);
+    bool build_if_needs(const std::string &output);
     bool needs_rebuild(const std::string &output);
 };
 
-}; // namespace ab
+}; // namespace nbs
 
-namespace ab::log
+namespace nbs::log
 {
 enum LogLevel
 {
@@ -114,9 +114,9 @@ ABUILDAPI void log(LogLevel level, std::string message);
 ABUILDAPI void info(std::string message);
 ABUILDAPI void warning(std::string message);
 ABUILDAPI void error(std::string message);
-} // namespace ab::log
+} // namespace nbs::log
 
-namespace ab::c
+namespace nbs::c
 {
 enum Compiler
 {
@@ -162,7 +162,7 @@ struct CompileOptions
 ABUILDAPI std::string comp_str(Compiler comp);
 ABUILDAPI Compiler current_compiler();
 
-} // namespace ab::c
+} // namespace nbs::c
 
 // -------------------------------
 //
@@ -171,7 +171,7 @@ ABUILDAPI Compiler current_compiler();
 // -------------------------------
 #ifdef ABUILD_IMPLEMENTATION
 
-namespace ab
+namespace nbs
 {
 static Defaults defaults;
 
@@ -273,7 +273,7 @@ std::string Cmd::to_string() const
     return ss.str();
 }
 
-int Cmd::run() const
+bool Cmd::run() const
 {
     return run_async().await();
 }
@@ -301,7 +301,7 @@ void Cmd::run_or_die(const std::string &message) const
     int result = run();
     if (result != 0)
     {
-        ab::log::error(message);
+        nbs::log::error(message);
         exit(result);
     }
 }
@@ -450,12 +450,12 @@ Target::Target(const std::string &output, const std::vector<Cmd> &cmds, const st
 {
 }
 
-int Target::build()
+bool Target::build()
 {
     for (const auto cmd : cmds)
     {
         int result = cmd.run();
-        if (result != 0)
+        if (!result)
             return result;
     }
     return 0;
@@ -469,11 +469,11 @@ bool TargetMap::remove(const std::string &target_output)
 {
     return targets.erase(target_output) > 0;
 }
-int TargetMap::build(const std::string &output)
+bool TargetMap::build(const std::string &output)
 {
     auto target_it = targets.find(output);
     if (target_it == targets.end())
-        return 1;
+        return false;
     auto target = target_it->second;
 
     for (const auto &dep : target.dependencies)
@@ -481,27 +481,27 @@ int TargetMap::build(const std::string &output)
         if (targets.find(dep) != targets.end())
         {
             int result = build(dep);
-            if (result != 0)
-                return result;
+            if (!result)
+                return false;
         }
         else if (!std::filesystem::exists(dep))
         {
-            return 1;
+            return false;
         }
     }
 
     for (const auto &cmd : target.cmds)
     {
         int result = cmd.run();
-        if (result != 0)
-            return result;
+        if (!result)
+            return false;
     }
-    return 0;
+    return true;
 }
-int TargetMap::build_if_needs(const std::string &output)
+bool TargetMap::build_if_needs(const std::string &output)
 {
     if (!needs_rebuild(output))
-        return 0;
+        return true;
 
     auto target = targets.find(output)->second;
 
@@ -510,22 +510,22 @@ int TargetMap::build_if_needs(const std::string &output)
         if (targets.find(dep) != targets.end())
         {
             int result = build_if_needs(dep);
-            if (result != 0)
-                return result;
+            if (!result)
+                return false;
         }
         else if (!std::filesystem::exists(dep))
         {
-            return 1;
+            return false;
         }
     }
 
     for (const auto &cmd : target.cmds)
     {
         int result = cmd.run();
-        if (result != 0)
-            return result;
+        if (!result)
+            return false;
     }
-    return 0;
+    return true;
 }
 bool TargetMap::needs_rebuild(const std::string &output)
 {
@@ -548,9 +548,9 @@ bool TargetMap::needs_rebuild(const std::string &output)
     }
     return false;
 }
-} // namespace ab
+} // namespace nbs
 
-namespace ab::log
+namespace nbs::log
 {
 static LogLevel minimal_level = Info;
 
@@ -592,9 +592,9 @@ ABUILDAPI void error(std::string message)
     log(Error, message);
 }
 
-} // namespace ab::log
+} // namespace nbs::log
 
-namespace ab::c
+namespace nbs::c
 {
 static CDefaults cdefaults;
 
@@ -685,7 +685,7 @@ Cmd dynamic_lib_cmd(strvec sources)
     TODO("static_lib_cmd");
 }
 
-} // namespace ab::c
+} // namespace nbs::c
 
 #endif // ABUILD_IMPLEMENTATION
 #endif // ABUILD_HPP

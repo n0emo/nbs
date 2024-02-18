@@ -1,13 +1,14 @@
-
 #define ABUILD_IMPLEMENTATION
-#include "../abuild.hpp"
+#include "../nbs.hpp"
 
 using namespace std;
-using namespace ab;
+using namespace nbs;
 
 int main(int argc, char **argv)
 {
     self_update(argc, argv, __FILE__);
+
+    make_directory_if_not_exists("build");
 
     strvec sources{"App.cpp", "Csv.cpp", "CsvParser.cpp", "main.cpp", "sort.cpp"};
     c::CompileOptions options{.compiler = c::GXX,
@@ -26,5 +27,5 @@ int main(int argc, char **argv)
 
     await_processes(processes);
     std::string exe = path({"build", "lab1"});
-    c::CompileOptions{.compiler = ab::c::GXX}.exe_cmd(exe, objects).run();
+    c::CompileOptions{.compiler = c::GXX}.exe_cmd(exe, objects).run();
 }

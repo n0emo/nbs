@@ -1,8 +1,8 @@
 #define ABUILD_IMPLEMENTATION
-#include "../abuild.hpp"
+#include "../nbs.hpp"
 
 using namespace std;
-using namespace ab;
+using namespace nbs;
 
 enum ConfType
 {
@@ -10,7 +10,7 @@ enum ConfType
     RELEASE
 };
 
-int build(int argc, char **argv)
+bool build(int argc, char **argv)
 {
     log::info("Building");
 
@@ -88,14 +88,14 @@ int main(int argc, char **argv)
 
     if (subcommand == "" || subcommand == "build")
     {
-        return build(argc, argv);
+        return build(argc, argv) != true;
     }
     else if (subcommand == "run")
     {
         int result = build(argc, argv);
-        if (result != 0)
-            return result;
-        return run();
+        if (!result)
+            return 1;
+        return run() != true;
     }
     else
     {
