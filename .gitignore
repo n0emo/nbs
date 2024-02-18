@@ -3,3 +3,4 @@
 *.ghc
 hello
 abuild
+build/
