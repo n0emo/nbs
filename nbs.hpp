@@ -298,11 +298,10 @@ Process Cmd::run_async() const
 
 void Cmd::run_or_die(const std::string &message) const
 {
-    int result = run();
-    if (result != 0)
+    if (!run())
     {
         nbs::log::error(message);
-        exit(result);
+        exit(1);
     }
 }
 
@@ -650,15 +649,16 @@ Cmd CompileOptions::cmd(strvec sources, strvec additional_flags)
     if (!standard.empty())
         cmd.append("-std=" + standard);
 
+    cmd.append_many(sources);
+    cmd.append_many(additional_flags);
+
     cmd.append_many(flags);
     cmd.append_many_prefixed("-I", include_paths);
-    cmd.append_many_prefixed("-l", libs);
-    cmd.append_many_prefixed("-L", lib_paths);
     cmd.append_many_prefixed("-D", defines);
     cmd.append_many(other_flags);
 
-    cmd.append_many(additional_flags);
-    cmd.append_many(sources);
+    cmd.append_many_prefixed("-L", lib_paths);
+    cmd.append_many_prefixed("-l", libs);
 
     return cmd;
 }
