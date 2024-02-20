@@ -1,5 +1,5 @@
-#ifndef ABUILD_HPP
-#define ABUILD_HPP
+#ifndef NBS_HPP
+#define NBS_HPP
 
 #include <cassert>
 #include <cstdlib>
@@ -17,7 +17,7 @@
 #include <unistd.h>
 #endif
 
-#define ABUILDAPI static inline
+#define NBSAPI static inline
 #define TODO(thing) assert(0 && thing "is not implemented.")
 #define UNREACHABLE assert(0 && "UNREACHABLE")
 
@@ -72,18 +72,18 @@ struct Target
     bool build();
 };
 
-ABUILDAPI bool await_processes(const std::vector<Process> &processes);
-ABUILDAPI Defaults *get_defaults();
-ABUILDAPI void self_update(int argc, char **argv, std::string source);
-ABUILDAPI long compare_last_mod_time(const std::string &path1, const std::string &path2);
-ABUILDAPI std::string string_join(const std::string &sep, const strvec &strings);
-ABUILDAPI std::string path(const strvec &path);
-ABUILDAPI bool make_directory_if_not_exists(const std::string &path);
-ABUILDAPI std::string trim_to(const std::string &str, const std::string &chars = "\n\r ");
-ABUILDAPI std::string trim_right_to(const std::string &str, const std::string &chars = "\n\r ");
-ABUILDAPI std::string trim_left_to(const std::string &str, const std::string &chars = "\n\r ");
-ABUILDAPI strvec split(const std::string &str, const std::string &delim);
-ABUILDAPI std::string change_extension(const std::string &file, const std::string &new_extension);
+NBSAPI bool await_processes(const std::vector<Process> &processes);
+NBSAPI Defaults *get_defaults();
+NBSAPI void self_update(int argc, char **argv, std::string source);
+NBSAPI long compare_last_mod_time(const std::string &path1, const std::string &path2);
+NBSAPI std::string string_join(const std::string &sep, const strvec &strings);
+NBSAPI std::string path(const strvec &path);
+NBSAPI bool make_directory_if_not_exists(const std::string &path);
+NBSAPI std::string trim_to(const std::string &str, const std::string &chars = "\n\r ");
+NBSAPI std::string trim_right_to(const std::string &str, const std::string &chars = "\n\r ");
+NBSAPI std::string trim_left_to(const std::string &str, const std::string &chars = "\n\r ");
+NBSAPI strvec split(const std::string &str, const std::string &delim);
+NBSAPI std::string change_extension(const std::string &file, const std::string &new_extension);
 
 struct TargetMap
 {
@@ -109,11 +109,11 @@ enum LogLevel
     Error = 2,
 };
 
-ABUILDAPI std::string log_level_str(LogLevel level);
-ABUILDAPI void log(LogLevel level, std::string message);
-ABUILDAPI void info(std::string message);
-ABUILDAPI void warning(std::string message);
-ABUILDAPI void error(std::string message);
+NBSAPI std::string log_level_str(LogLevel level);
+NBSAPI void log(LogLevel level, std::string message);
+NBSAPI void info(std::string message);
+NBSAPI void warning(std::string message);
+NBSAPI void error(std::string message);
 } // namespace nbs::log
 
 namespace nbs::c
@@ -140,7 +140,7 @@ struct CDefaults
     strvec other_flags;
 };
 
-ABUILDAPI CDefaults *get_cdefaults();
+NBSAPI CDefaults *get_cdefaults();
 struct CompileOptions
 {
     Compiler compiler = get_cdefaults()->compiler;
@@ -159,8 +159,8 @@ struct CompileOptions
     Cmd dynamic_lib_cmd(strvec sources);
 };
 
-ABUILDAPI std::string comp_str(Compiler comp);
-ABUILDAPI Compiler current_compiler();
+NBSAPI std::string comp_str(Compiler comp);
+NBSAPI Compiler current_compiler();
 
 } // namespace nbs::c
 
@@ -169,7 +169,7 @@ ABUILDAPI Compiler current_compiler();
 //        Implementation
 //
 // -------------------------------
-#ifdef ABUILD_IMPLEMENTATION
+#ifdef NBS_IMPLEMENTATION
 
 namespace nbs
 {
@@ -204,7 +204,7 @@ bool Process::await() const
     }
 }
 
-ABUILDAPI bool await_processes(const std::vector<Process> &processes)
+NBSAPI bool await_processes(const std::vector<Process> &processes)
 {
     bool result = true;
     for (const auto &proc : processes)
@@ -217,7 +217,7 @@ ABUILDAPI bool await_processes(const std::vector<Process> &processes)
     return result;
 }
 
-ABUILDAPI Defaults *get_defaults()
+NBSAPI Defaults *get_defaults()
 {
     return &defaults;
 }
@@ -280,6 +280,9 @@ bool Cmd::run() const
 
 Process Cmd::run_async() const
 {
+#ifdef _WIN32
+#error run_async is not implemented on Windows
+#else
     std::cout << to_string() << '\n';
     int p = fork();
     if (p < 0)
@@ -294,6 +297,7 @@ Process Cmd::run_async() const
     }
 
     return p;
+#endif
 }
 
 void Cmd::run_or_die(const std::string &message) const
@@ -316,7 +320,7 @@ std::unique_ptr<char *[]> Cmd::to_c_argv() const
     return std::move(result);
 }
 
-ABUILDAPI void self_update(int argc, char **argv, std::string source)
+NBSAPI void self_update(int argc, char **argv, std::string source)
 {
     assert(argc > 0);
     std::string exe(argv[0]);
@@ -341,7 +345,7 @@ ABUILDAPI void self_update(int argc, char **argv, std::string source)
 
     exit(0);
 }
-ABUILDAPI long compare_last_mod_time(const std::string &path1, const std::string &path2)
+NBSAPI long compare_last_mod_time(const std::string &path1, const std::string &path2)
 {
     auto time1 = std::filesystem::last_write_time(path1);
     auto time2 = std::filesystem::last_write_time(path2);
@@ -349,7 +353,7 @@ ABUILDAPI long compare_last_mod_time(const std::string &path1, const std::string
     return diff.count();
 }
 
-ABUILDAPI std::string string_join(const std::string &sep, const strvec &strings)
+NBSAPI std::string string_join(const std::string &sep, const strvec &strings)
 {
     if (strings.empty())
         return "";
@@ -368,26 +372,26 @@ ABUILDAPI std::string string_join(const std::string &sep, const strvec &strings)
     return ss.str();
 }
 
-ABUILDAPI std::string path(const strvec &path)
+NBSAPI std::string path(const strvec &path)
 {
-#ifdef __WIN32
+#ifdef _WIN32
     return string_join("\\", path);
 #else
     return string_join("/", path);
 #endif
 }
 
-ABUILDAPI bool make_directory_if_not_exists(const std::string &path)
+NBSAPI bool make_directory_if_not_exists(const std::string &path)
 {
     return std::filesystem::create_directory(path);
 }
 
-ABUILDAPI std::string trim_to(const std::string &str, const std::string &chars)
+NBSAPI std::string trim_to(const std::string &str, const std::string &chars)
 {
     return trim_right_to(trim_left_to(str));
 }
 
-ABUILDAPI std::string trim_right_to(const std::string &str, const std::string &chars)
+NBSAPI std::string trim_right_to(const std::string &str, const std::string &chars)
 {
     size_t count = str.size();
     while (count > 0 && chars.find(str[count - 1]) == std::string::npos)
@@ -397,7 +401,7 @@ ABUILDAPI std::string trim_right_to(const std::string &str, const std::string &c
     return str.substr(0, count);
 }
 
-ABUILDAPI std::string trim_left_to(const std::string &str, const std::string &chars)
+NBSAPI std::string trim_left_to(const std::string &str, const std::string &chars)
 {
     size_t index = 0;
     while (index < str.size() && chars.find(str[index]) == std::string::npos)
@@ -407,7 +411,7 @@ ABUILDAPI std::string trim_left_to(const std::string &str, const std::string &ch
     return str.substr(index);
 }
 
-ABUILDAPI strvec split(const std::string &str, const std::string &delim)
+NBSAPI strvec split(const std::string &str, const std::string &delim)
 {
     if (str.empty())
         return {""};
@@ -435,7 +439,7 @@ ABUILDAPI strvec split(const std::string &str, const std::string &delim)
     return result;
 }
 
-ABUILDAPI std::string change_extension(const std::string &file, const std::string &new_extension)
+NBSAPI std::string change_extension(const std::string &file, const std::string &new_extension)
 {
     return trim_right_to(file, ".") + new_extension;
 }
@@ -553,7 +557,7 @@ namespace nbs::log
 {
 static LogLevel minimal_level = Info;
 
-ABUILDAPI void log(LogLevel level, std::string message)
+NBSAPI void log(LogLevel level, std::string message)
 {
     if (level < minimal_level)
         return;
@@ -561,7 +565,7 @@ ABUILDAPI void log(LogLevel level, std::string message)
     (level == Info ? std::cout : std::cerr) << '[' << log_level_str(level) << "] " << message << '\n';
 }
 
-ABUILDAPI std::string log_level_str(LogLevel level)
+NBSAPI std::string log_level_str(LogLevel level)
 {
     switch (level)
     {
@@ -576,17 +580,17 @@ ABUILDAPI std::string log_level_str(LogLevel level)
     }
 }
 
-ABUILDAPI void info(std::string message)
+NBSAPI void info(std::string message)
 {
     log(Info, message);
 }
 
-ABUILDAPI void warning(std::string message)
+NBSAPI void warning(std::string message)
 {
     log(Warning, message);
 }
 
-ABUILDAPI void error(std::string message)
+NBSAPI void error(std::string message)
 {
     log(Error, message);
 }
@@ -597,7 +601,7 @@ namespace nbs::c
 {
 static CDefaults cdefaults;
 
-ABUILDAPI std::string comp_str(Compiler comp)
+NBSAPI std::string comp_str(Compiler comp)
 {
     switch (comp)
     {
@@ -618,7 +622,7 @@ ABUILDAPI std::string comp_str(Compiler comp)
     }
 }
 
-ABUILDAPI Compiler current_compiler()
+NBSAPI Compiler current_compiler()
 {
 //  Clang C++ emulates GCC, so it has to appear early.
 #if defined __clang__ && !defined(__ibmxl__) && !defined(__CODEGEARC__)
@@ -636,7 +640,7 @@ ABUILDAPI Compiler current_compiler()
     TODO("Unknown compiler");
 }
 
-ABUILDAPI CDefaults *get_cdefaults()
+NBSAPI CDefaults *get_cdefaults()
 {
     return &cdefaults;
 }
@@ -687,5 +691,5 @@ Cmd dynamic_lib_cmd(strvec sources)
 
 } // namespace nbs::c
 
-#endif // ABUILD_IMPLEMENTATION
-#endif // ABUILD_HPP
+#endif // NBS_IMPLEMENTATION
+#endif // NBS_HPP

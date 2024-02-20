@@ -1,5 +1,5 @@
 CompileFlags:
-  Add: [-DABUILD_IMPLEMENTATION]
+  Add: [-DNBS_IMPLEMENTATION]
 
 Diagnostics:
   # Remove: -Wmacro-redefined
