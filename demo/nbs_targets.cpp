@@ -1,8 +1,11 @@
-#define ABUILD_IMPLEMENTATION
+#define NBS_IMPLEMENTATION
 #include "../nbs.hpp"
 
 using namespace std;
 using namespace nbs;
+using namespace os;
+using namespace str;
+using namespace target;
 
 enum ConfType
 {
@@ -34,40 +37,40 @@ bool build(int argc, char **argv)
     c::CompileOptions options{.compiler = c::GXX,
                               .standard = "c++20",
                               .flags = {"-Wall", "-Wextra", "-pedantic"},
-                              .include_paths = {"include"}};
+                              .include_paths = {Path("include")}};
 
-    std::string build_path = get_defaults()->build_path;
+    Path build_path = get_defaults()->build_path;
     make_directory_if_not_exists(build_path);
     switch (configuration)
     {
     case DEBUG:
-        build_path = path({build_path, "debug"});
+        build_path = build_path + "debug";
         options.flags.emplace_back("-g");
         break;
     case RELEASE:
-        build_path = path({build_path, "relese"});
+        build_path = build_path + "relese";
         options.flags.emplace_back("-O3");
         break;
     }
     make_directory_if_not_exists(build_path);
 
-    strvec outputs;
+    pathvec outputs;
     for (const auto &source : sources)
     {
-        std::string output = path({build_path, change_extension(source, "o")});
+        Path output = build_path + change_extension(source, "o");
         outputs.emplace_back(output);
-        std::string input = path({"src", source});
+        Path input({"src", source});
         Cmd cmd(options.obj_cmd(output, input));
         Target target(output, cmd, {input});
         targets.insert(target);
     }
 
-    std::string exe = path({build_path, "lab1"});
+    Path exe = build_path + "lab1";
     Cmd exe_cmd = c::CompileOptions{.compiler = c::GXX}.exe_cmd(exe, outputs);
     Target exe_target(exe, exe_cmd, outputs);
     targets.insert(exe_target);
 
-    return targets.build_if_needs(exe);
+    return targets.build_if_needs(exe.str());
 }
 
 int run()

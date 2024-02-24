@@ -1,8 +1,10 @@
-#define ABUILD_IMPLEMENTATION
+#define NBS_IMPLEMENTATION
 #include "../nbs.hpp"
 
 using namespace std;
 using namespace nbs;
+using namespace nbs::os;
+using namespace nbs::str;
 
 int main(int argc, char **argv)
 {
@@ -14,18 +16,18 @@ int main(int argc, char **argv)
     c::CompileOptions options{.compiler = c::GXX,
                               .standard = "c++20",
                               .flags = {"-Wall", "-Wextra", "-pedantic", "-O3"},
-                              .include_paths = {"include"}};
+                              .include_paths = {Path("include")}};
     std::vector<Process> processes;
-    strvec objects;
+    pathvec objects;
     for (const auto &source : sources)
     {
-        std::string input = path({"src", source});
-        std::string output = path({"build", change_extension(source, "o")});
+        Path input = Path({"src", source});
+        Path output = Path({"build", change_extension(source, "o")});
         objects.emplace_back(output);
         processes.emplace_back(options.obj_cmd(output, input).run_async());
     }
 
     await_processes(processes);
-    std::string exe = path({"build", "lab1"});
+    Path exe("build/lab1");
     c::CompileOptions{.compiler = c::GXX}.exe_cmd(exe, objects).run();
 }

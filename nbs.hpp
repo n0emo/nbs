@@ -2,7 +2,6 @@
 #define NBS_HPP
 
 #include <cassert>
-#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <sstream>
@@ -24,8 +23,6 @@
 namespace nbs
 {
 typedef std::vector<std::string> strvec;
-
-const std::string os_path_sep = "/";
 
 struct Process
 {
@@ -60,45 +57,59 @@ struct Defaults
     std::string build_path = "";
 };
 
-struct Target
-{
-    std::string output;
-    strvec dependencies;
-    std::vector<Cmd> cmds;
-
-    Target(const std::string &output, const Cmd &cmd, const strvec &dependencies = {});
-    Target(const std::string &output, const std::vector<Cmd> &cmds, const strvec &dependencies = {});
-
-    bool build();
-};
-
 NBSAPI bool await_processes(const std::vector<Process> &processes);
 NBSAPI Defaults *get_defaults();
-NBSAPI void self_update(int argc, char **argv, std::string source);
-NBSAPI long compare_last_mod_time(const std::string &path1, const std::string &path2);
-NBSAPI std::string string_join(const std::string &sep, const strvec &strings);
-NBSAPI std::string path(const strvec &path);
-NBSAPI bool make_directory_if_not_exists(const std::string &path);
+NBSAPI void self_update(int argc, char **argv, const std::string &source);
+
+}; // namespace nbs
+
+namespace nbs::str
+{
+
+NBSAPI std::string join(const std::string &sep, const strvec &strings);
 NBSAPI std::string trim_to(const std::string &str, const std::string &chars = "\n\r ");
 NBSAPI std::string trim_right_to(const std::string &str, const std::string &chars = "\n\r ");
 NBSAPI std::string trim_left_to(const std::string &str, const std::string &chars = "\n\r ");
 NBSAPI strvec split(const std::string &str, const std::string &delim);
 NBSAPI std::string change_extension(const std::string &file, const std::string &new_extension);
+} // namespace nbs::str
 
-struct TargetMap
+namespace nbs::os
 {
-    std::unordered_map<std::string, Target> targets;
+#ifdef _WIN32
+const bool WINDOWS = true;
+#else
+const bool WINDOWS = false;
+#endif
 
-    TargetMap() = default;
+const std::string path_sep = WINDOWS ? "\\" : "/";
 
-    void insert(Target &target);
-    bool remove(const std::string &target);
-    bool build(const std::string &output);
-    bool build_if_needs(const std::string &output);
-    bool needs_rebuild(const std::string &output);
+struct Path
+{
+    strvec dirs;
+
+    Path(const strvec &dirs);
+    Path(const std::string &path);
+    Path(const Path &path);
+
+    std::string str() const;
+    Path cat(const Path &other) const;
+    void append(const Path &other);
+
+    Path operator+(const Path &other) const;
+    Path operator+(const std::string &other) const;
+    friend Path operator+(const std::string &left, const Path &right);
 };
 
-}; // namespace nbs
+typedef std::vector<Path> pathvec;
+
+NBSAPI strvec paths_to_strs(const pathvec &paths);
+NBSAPI pathvec strs_to_paths(const strvec &paths);
+NBSAPI long compare_last_mod_time(const Path &path1, const Path &path2);
+NBSAPI bool make_directory_if_not_exists(const Path &path);
+NBSAPI bool make_directory_if_not_exists(const std::string &path);
+NBSAPI bool exists(const Path &path);
+} // namespace nbs::os
 
 namespace nbs::log
 {
@@ -110,11 +121,39 @@ enum LogLevel
 };
 
 NBSAPI std::string log_level_str(LogLevel level);
-NBSAPI void log(LogLevel level, std::string message);
-NBSAPI void info(std::string message);
-NBSAPI void warning(std::string message);
-NBSAPI void error(std::string message);
+NBSAPI void log(LogLevel level, const std::string &message);
+NBSAPI void info(const std::string &message);
+NBSAPI void warning(const std::string &message);
+NBSAPI void error(const std::string &message);
 } // namespace nbs::log
+
+namespace nbs::target
+{
+struct Target
+{
+    os::Path output;
+    os::pathvec dependencies;
+    std::vector<Cmd> cmds;
+
+    Target(const os::Path &output, const Cmd &cmd, const os::pathvec &dependencies = {});
+    Target(const os::Path &output, const std::vector<Cmd> &cmds, const os::pathvec &dependencies = {});
+
+    bool build() const;
+};
+
+struct TargetMap
+{
+    std::unordered_map<std::string, Target> targets;
+
+    TargetMap() = default;
+
+    void insert(Target &target);
+    bool remove(const std::string &target);
+    bool build(const std::string &output) const;
+    bool build_if_needs(const std::string &output) const;
+    bool needs_rebuild(const std::string &output) const;
+};
+} // namespace nbs::target
 
 namespace nbs::c
 {
@@ -133,9 +172,9 @@ struct CDefaults
     Compiler compiler = CXX;
     std::string standard;
     strvec flags;
-    strvec include_paths;
-    strvec libs;
-    strvec lib_paths;
+    os::pathvec include_paths;
+    os::pathvec libs;
+    os::pathvec lib_paths;
     strvec defines;
     strvec other_flags;
 };
@@ -146,17 +185,22 @@ struct CompileOptions
     Compiler compiler = get_cdefaults()->compiler;
     std::string standard = get_cdefaults()->standard;
     strvec flags = get_cdefaults()->flags;
-    strvec include_paths = get_cdefaults()->include_paths;
-    strvec libs = get_cdefaults()->libs;
-    strvec lib_paths = get_cdefaults()->lib_paths;
+    os::pathvec include_paths = get_cdefaults()->include_paths;
+    os::pathvec libs = get_cdefaults()->libs;
+    os::pathvec lib_paths = get_cdefaults()->lib_paths;
     strvec defines = get_cdefaults()->defines;
     strvec other_flags = get_cdefaults()->other_flags;
 
-    Cmd cmd(strvec sources, strvec additional_flags = {});
-    Cmd exe_cmd(std::string output, strvec sources);
-    Cmd obj_cmd(std::string output, std::string source);
-    Cmd static_lib_cmd(strvec sources);
-    Cmd dynamic_lib_cmd(strvec sources);
+    Cmd cmd(const os::pathvec &sources, const strvec &additional_flags = {}) const;
+    Cmd cmd(const strvec &sources, const strvec &additional_flags = {}) const;
+    Cmd exe_cmd(const os::Path &output, const os::pathvec &sources) const;
+    Cmd exe_cmd(const std::string &output, const strvec &sources) const;
+    Cmd obj_cmd(const os::Path &output, const os::Path &source) const;
+    Cmd obj_cmd(const std::string &output, const std::string &source) const;
+    Cmd static_lib_cmd(const os::pathvec &sources) const;  // TODO
+    Cmd static_lib_cmd(const strvec &sources) const;       // TODO
+    Cmd dynamic_lib_cmd(const os::pathvec &sources) const; // TODO
+    Cmd dynamic_lib_cmd(const strvec &sources) const;      // TODO
 };
 
 NBSAPI std::string comp_str(Compiler comp);
@@ -186,7 +230,7 @@ bool Process::await() const
         int status = 0;
         if (waitpid(pid, &status, 0) < 0)
         {
-            TODO("waitpit error handling");
+            TODO("waitpid error handling");
         }
 
         if (WIFEXITED(status))
@@ -320,12 +364,12 @@ std::unique_ptr<char *[]> Cmd::to_c_argv() const
     return std::move(result);
 }
 
-NBSAPI void self_update(int argc, char **argv, std::string source)
+NBSAPI void self_update(int argc, char **argv, const std::string &source)
 {
     assert(argc > 0);
     std::string exe(argv[0]);
 
-    if (compare_last_mod_time(source, exe) < 0)
+    if (os::compare_last_mod_time(source, exe) < 0)
         return;
 
     log::info("Updating");
@@ -345,15 +389,107 @@ NBSAPI void self_update(int argc, char **argv, std::string source)
 
     exit(0);
 }
-NBSAPI long compare_last_mod_time(const std::string &path1, const std::string &path2)
+} // namespace nbs
+
+namespace nbs::os
 {
-    auto time1 = std::filesystem::last_write_time(path1);
-    auto time2 = std::filesystem::last_write_time(path2);
+Path::Path(const strvec &dirs)
+{
+    this->dirs = dirs;
+}
+
+Path::Path(const std::string &path)
+{
+    // TODO: consider further linux and windows separation
+    this->dirs = str::split(path, "/\\");
+}
+
+Path::Path(const Path &other)
+{
+    this->dirs = other.dirs;
+}
+
+std::string Path::str() const
+{
+    return str::join(path_sep, dirs);
+}
+
+Path Path::cat(const Path &other) const
+{
+    Path result(dirs);
+    result.append(other.dirs);
+    return result;
+}
+
+void Path::append(const Path &other)
+{
+    dirs.insert(dirs.end(), other.dirs.begin(), other.dirs.end());
+}
+
+Path Path::operator+(const Path &other) const
+{
+    return this->cat(other);
+}
+
+Path Path::operator+(const std::string &other) const
+{
+    return this->cat(other);
+}
+
+Path operator+(const std::string &left, const Path &right)
+{
+    Path result(left);
+    result.append(right);
+    return result;
+}
+
+NBSAPI strvec paths_to_strs(const pathvec &paths)
+{
+    strvec result;
+    for (const Path &path : paths)
+    {
+        result.push_back(path.str());
+    }
+    return result;
+}
+
+NBSAPI pathvec strs_to_paths(const strvec &paths)
+{
+    pathvec result;
+    for (const Path &path : paths)
+    {
+        result.push_back(path);
+    }
+    return result;
+}
+
+NBSAPI long compare_last_mod_time(const Path &path1, const Path &path2)
+{
+    auto time1 = std::filesystem::last_write_time(path1.str());
+    auto time2 = std::filesystem::last_write_time(path2.str());
     auto diff = time1 - time2;
     return diff.count();
 }
 
-NBSAPI std::string string_join(const std::string &sep, const strvec &strings)
+NBSAPI bool make_directory_if_not_exists(const Path &path)
+{
+    return std::filesystem::create_directory(path.str());
+}
+
+NBSAPI bool make_directory_if_not_exists(const std::string &path)
+{
+    return std::filesystem::create_directory(Path(path).str());
+}
+
+NBSAPI bool exists(const Path &path)
+{
+    return std::filesystem::exists(path.str());
+}
+} // namespace nbs::os
+
+namespace nbs::str
+{
+NBSAPI std::string join(const std::string &sep, const strvec &strings)
 {
     if (strings.empty())
         return "";
@@ -370,20 +506,6 @@ NBSAPI std::string string_join(const std::string &sep, const strvec &strings)
     ss << strings.back();
 
     return ss.str();
-}
-
-NBSAPI std::string path(const strvec &path)
-{
-#ifdef _WIN32
-    return string_join("\\", path);
-#else
-    return string_join("/", path);
-#endif
-}
-
-NBSAPI bool make_directory_if_not_exists(const std::string &path)
-{
-    return std::filesystem::create_directory(path);
 }
 
 NBSAPI std::string trim_to(const std::string &str, const std::string &chars)
@@ -443,127 +565,11 @@ NBSAPI std::string change_extension(const std::string &file, const std::string &
 {
     return trim_right_to(file, ".") + new_extension;
 }
-
-Target::Target(const std::string &output, const Cmd &cmd, const strvec &dependencies)
-    : output(output), cmds({cmd}), dependencies(dependencies)
-{
-}
-Target::Target(const std::string &output, const std::vector<Cmd> &cmds, const strvec &dependencies)
-    : output(output), cmds(cmds), dependencies(dependencies)
-{
-}
-
-bool Target::build()
-{
-    for (const auto cmd : cmds)
-    {
-        int result = cmd.run();
-        if (!result)
-            return result;
-    }
-    return 0;
-}
-
-void TargetMap::insert(Target &target)
-{
-    targets.insert({target.output, target});
-}
-bool TargetMap::remove(const std::string &target_output)
-{
-    return targets.erase(target_output) > 0;
-}
-bool TargetMap::build(const std::string &output)
-{
-    auto target_it = targets.find(output);
-    if (target_it == targets.end())
-        return false;
-    auto target = target_it->second;
-
-    for (const auto &dep : target.dependencies)
-    {
-        if (targets.find(dep) != targets.end())
-        {
-            int result = build(dep);
-            if (!result)
-                return false;
-        }
-        else if (!std::filesystem::exists(dep))
-        {
-            return false;
-        }
-    }
-
-    for (const auto &cmd : target.cmds)
-    {
-        int result = cmd.run();
-        if (!result)
-            return false;
-    }
-    return true;
-}
-bool TargetMap::build_if_needs(const std::string &output)
-{
-    if (!needs_rebuild(output))
-        return true;
-
-    auto target = targets.find(output)->second;
-
-    for (const auto &dep : target.dependencies)
-    {
-        if (targets.find(dep) != targets.end())
-        {
-            int result = build_if_needs(dep);
-            if (!result)
-                return false;
-        }
-        else if (!std::filesystem::exists(dep))
-        {
-            return false;
-        }
-    }
-
-    for (const auto &cmd : target.cmds)
-    {
-        int result = cmd.run();
-        if (!result)
-            return false;
-    }
-    return true;
-}
-bool TargetMap::needs_rebuild(const std::string &output)
-{
-    if (!std::filesystem::exists(output))
-        return true;
-
-    auto target_it = targets.find(output);
-    if (target_it == targets.end())
-        TODO("needs_rebuild error handling");
-    auto target = target_it->second;
-
-    for (const auto &dep : target.dependencies)
-    {
-        if ((targets.find(dep) != targets.end() && needs_rebuild(dep)) ||
-            (targets.find(dep) != targets.end() && !std::filesystem::exists(dep) ||
-             (std::filesystem::exists(dep) && compare_last_mod_time(output, dep) < 0)))
-        {
-            return true;
-        }
-    }
-    return false;
-}
-} // namespace nbs
+} // namespace nbs::str
 
 namespace nbs::log
 {
 static LogLevel minimal_level = Info;
-
-NBSAPI void log(LogLevel level, std::string message)
-{
-    if (level < minimal_level)
-        return;
-
-    (level == Info ? std::cout : std::cerr) << '[' << log_level_str(level) << "] " << message << '\n';
-}
 
 NBSAPI std::string log_level_str(LogLevel level)
 {
@@ -580,22 +586,144 @@ NBSAPI std::string log_level_str(LogLevel level)
     }
 }
 
-NBSAPI void info(std::string message)
+NBSAPI void log(LogLevel level, const std::string &message)
+{
+    if (level < minimal_level)
+        return;
+
+    (level == Info ? std::cout : std::cerr) << '[' << log_level_str(level) << "] " << message << '\n';
+}
+
+NBSAPI void info(const std::string &message)
 {
     log(Info, message);
 }
 
-NBSAPI void warning(std::string message)
+NBSAPI void warning(const std::string &message)
 {
     log(Warning, message);
 }
 
-NBSAPI void error(std::string message)
+NBSAPI void error(const std::string &message)
 {
     log(Error, message);
 }
 
 } // namespace nbs::log
+
+namespace nbs::target
+{
+Target::Target(const os::Path &output, const Cmd &cmd, const os::pathvec &dependencies)
+    : output(output), cmds({cmd}), dependencies(dependencies)
+{
+}
+Target::Target(const os::Path &output, const std::vector<Cmd> &cmds, const os::pathvec &dependencies)
+    : output(output), cmds(cmds), dependencies(dependencies)
+{
+}
+
+bool Target::build() const
+{
+    for (const auto cmd : cmds)
+    {
+        int result = cmd.run();
+        if (!result)
+            return result;
+    }
+    return 0;
+}
+void TargetMap::insert(Target &target)
+{
+    targets.insert({target.output.str(), target});
+}
+
+bool TargetMap::remove(const std::string &target_output)
+{
+    return targets.erase(target_output) > 0;
+}
+
+bool TargetMap::build(const std::string &output) const
+{
+    auto target_it = targets.find(output);
+    if (target_it == targets.end())
+        return false;
+    auto target = target_it->second;
+
+    for (const auto &dep : target.dependencies)
+    {
+        if (targets.find(dep.str()) != targets.end())
+        {
+            int result = build(dep.str());
+            if (!result)
+                return false;
+        }
+        else if (!os::exists(dep))
+        {
+            return false;
+        }
+    }
+
+    for (const auto &cmd : target.cmds)
+    {
+        int result = cmd.run();
+        if (!result)
+            return false;
+    }
+    return true;
+}
+
+bool TargetMap::build_if_needs(const std::string &output) const
+{
+    if (!needs_rebuild(output))
+        return true;
+
+    auto target = targets.find(output)->second;
+
+    for (const auto &dep : target.dependencies)
+    {
+        if (targets.find(dep.str()) != targets.end())
+        {
+            int result = build_if_needs(dep.str());
+            if (!result)
+                return false;
+        }
+        else if (!os::exists(dep))
+        {
+            return false;
+        }
+    }
+
+    for (const auto &cmd : target.cmds)
+    {
+        int result = cmd.run();
+        if (!result)
+            return false;
+    }
+    return true;
+}
+
+bool TargetMap::needs_rebuild(const std::string &output) const
+{
+    if (!std::filesystem::exists(output))
+        return true;
+
+    auto target_it = targets.find(output);
+    if (target_it == targets.end())
+        TODO("needs_rebuild error handling");
+    auto target = target_it->second;
+
+    for (const auto &dep : target.dependencies)
+    {
+        if ((targets.find(dep.str()) != targets.end() && needs_rebuild(dep.str())) ||
+            (targets.find(dep.str()) != targets.end() && !std::filesystem::exists(dep.str()) ||
+             (std::filesystem::exists(dep.str()) && os::compare_last_mod_time(output, dep.str()) < 0)))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace nbs::target
 
 namespace nbs::c
 {
@@ -645,7 +773,7 @@ NBSAPI CDefaults *get_cdefaults()
     return &cdefaults;
 }
 
-Cmd CompileOptions::cmd(strvec sources, strvec additional_flags)
+Cmd CompileOptions::cmd(const os::pathvec &sources, const strvec &additional_flags) const
 {
     Cmd cmd;
 
@@ -653,42 +781,44 @@ Cmd CompileOptions::cmd(strvec sources, strvec additional_flags)
     if (!standard.empty())
         cmd.append("-std=" + standard);
 
-    cmd.append_many(sources);
+    cmd.append_many(os::paths_to_strs(sources));
     cmd.append_many(additional_flags);
 
     cmd.append_many(flags);
-    cmd.append_many_prefixed("-I", include_paths);
+    cmd.append_many_prefixed("-I", os::paths_to_strs(include_paths));
     cmd.append_many_prefixed("-D", defines);
     cmd.append_many(other_flags);
 
-    cmd.append_many_prefixed("-L", lib_paths);
-    cmd.append_many_prefixed("-l", libs);
+    cmd.append_many_prefixed("-L", os::paths_to_strs(lib_paths));
+    cmd.append_many_prefixed("-l", os::paths_to_strs(libs));
 
     return cmd;
 }
 
-Cmd CompileOptions::exe_cmd(std::string output, strvec sources)
+Cmd CompileOptions::cmd(const strvec &sources, const strvec &additional_flags) const
 {
-    return this->cmd(sources, {"-o", output});
+    return this->cmd(os::strs_to_paths(sources), additional_flags);
 }
 
-Cmd CompileOptions::obj_cmd(std::string output, std::string source)
+Cmd CompileOptions::exe_cmd(const os::Path &output, const os::pathvec &sources) const
 {
-    return this->cmd({source}, {"-c", "-o", output});
+    return this->cmd(sources, {"-o", output.str()});
 }
 
-Cmd static_lib_cmd(strvec sources)
+Cmd CompileOptions::exe_cmd(const std::string &output, const strvec &sources) const
 {
-    (void)sources;
-    TODO("static_lib_cmd");
+    return this->exe_cmd(os::Path(output), os::strs_to_paths(sources));
 }
 
-Cmd dynamic_lib_cmd(strvec sources)
+Cmd CompileOptions::obj_cmd(const os::Path &output, const os::Path &source) const
 {
-    (void)sources;
-    TODO("static_lib_cmd");
+    return this->cmd({source}, {"-c", "-o", output.str()});
 }
 
+Cmd CompileOptions::obj_cmd(const std::string &output, const std::string &source) const
+{
+    return this->obj_cmd(os::Path(output), os::Path(source));
+}
 } // namespace nbs::c
 
 #endif // NBS_IMPLEMENTATION
