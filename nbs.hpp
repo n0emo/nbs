@@ -4,6 +4,7 @@
 #include <cassert>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -59,6 +60,7 @@ struct Defaults
 
 NBSAPI bool await_processes(const std::vector<Process> &processes);
 NBSAPI Defaults *get_defaults();
+NBSAPI std::optional<std::string> shift_args(int &argc, char **&argv);
 NBSAPI void self_update(int argc, char **argv, const std::string &source);
 
 }; // namespace nbs
@@ -362,6 +364,19 @@ std::unique_ptr<char *[]> Cmd::to_c_argv() const
     }
     result[items.size()] = NULL;
     return std::move(result);
+}
+
+NBSAPI std::optional<std::string> shift_args(int &argc, char **&argv)
+{
+    if (argc == 0)
+    {
+        return std::nullopt;
+    }
+
+    std::string result(*argv);
+    argv++;
+    argc--;
+    return result;
 }
 
 NBSAPI void self_update(int argc, char **argv, const std::string &source)
