@@ -8,9 +8,8 @@ using namespace os;
 void build()
 {
     c::CompileOptions options{
-        .compiler = c::GXX,
-        .flags = {"-Wall", "-Wextra", "-pedantic"},
-        .include_paths = {Path(".")},
+        .compiler = c::current_compiler(), .flags = {"-Wall"},
+        // .include_paths = {Path(".")},
     };
 
     auto obj_proc = options.obj_cmd("hello.o", "hello.cpp").run_async();

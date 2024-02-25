@@ -11,7 +11,8 @@
 #include <vector>
 
 #ifdef _WIN32
-#error Windows is not implemented
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
 #else
 #include <sys/wait.h>
 #include <unistd.h>
@@ -19,7 +20,6 @@
 
 #define NBSAPI static inline
 #define TODO(thing) assert(0 && thing "is not implemented.")
-#define UNREACHABLE assert(0 && "UNREACHABLE")
 
 namespace nbs
 {
@@ -27,10 +27,13 @@ typedef std::vector<std::string> strvec;
 
 struct Process
 {
+#ifdef _WIN32
+    HANDLE handle;
+    Process(HANDLE handle);
+#else
     int pid;
-
     Process(int pid);
-
+#endif
     bool await() const;
 };
 
@@ -47,7 +50,7 @@ struct Cmd
     void append_many_prefixed(const std::string &prefix, const strvec &items);
 
     std::string to_string() const;
-    bool run() const; // TODO: make better than system from cstdlib
+    bool run() const;
     Process run_async() const;
     void run_or_die(const std::string &message) const;
     std::unique_ptr<char *[]> to_c_argv() const;
@@ -65,26 +68,15 @@ NBSAPI void self_update(int argc, char **argv, const std::string &source);
 
 }; // namespace nbs
 
-namespace nbs::str
-{
-
-NBSAPI std::string join(const std::string &sep, const strvec &strings);
-NBSAPI std::string trim_to(const std::string &str, const std::string &chars = "\n\r ");
-NBSAPI std::string trim_right_to(const std::string &str, const std::string &chars = "\n\r ");
-NBSAPI std::string trim_left_to(const std::string &str, const std::string &chars = "\n\r ");
-NBSAPI strvec split(const std::string &str, const std::string &delim);
-NBSAPI std::string change_extension(const std::string &file, const std::string &new_extension);
-} // namespace nbs::str
-
 namespace nbs::os
 {
 #ifdef _WIN32
-const bool WINDOWS = true;
+const std::string path_sep("\\");
+std::string windows_error_code_to_str(DWORD error);
+std::string windows_last_error_str();
 #else
-const bool WINDOWS = false;
+const std::string path_sep("/");
 #endif
-
-const std::string path_sep = WINDOWS ? "\\" : "/";
 
 struct Path
 {
@@ -112,6 +104,16 @@ NBSAPI bool make_directory_if_not_exists(const Path &path);
 NBSAPI bool make_directory_if_not_exists(const std::string &path);
 NBSAPI bool exists(const Path &path);
 } // namespace nbs::os
+
+namespace nbs::str
+{
+NBSAPI std::string join(const std::string &sep, const strvec &strings);
+NBSAPI std::string trim_to(const std::string &str, const std::string &chars = "\n\r ");
+NBSAPI std::string trim_right_to(const std::string &str, const std::string &chars = "\n\r ");
+NBSAPI std::string trim_left_to(const std::string &str, const std::string &chars = "\n\r ");
+NBSAPI strvec split(const std::string &str, const std::string &delim);
+NBSAPI std::string change_extension(const std::string &file, const std::string &new_extension);
+} // namespace nbs::str
 
 namespace nbs::log
 {
@@ -215,18 +217,44 @@ NBSAPI Compiler current_compiler();
 //        Implementation
 //
 // -------------------------------
+
 #ifdef NBS_IMPLEMENTATION
 
 namespace nbs
 {
 static Defaults defaults;
-
+#ifdef _WIN32
+Process::Process(HANDLE handle) : handle(handle)
+{
+}
+#else
 Process::Process(int pid) : pid(pid)
 {
 }
+#endif
 
 bool Process::await() const
 {
+#ifdef _WIN32
+    DWORD result = WaitForSingleObject(handle, INFINITE);
+
+    if (result == WAIT_FAILED)
+    {
+        log::error(os::windows_last_error_str());
+        TODO("WAIT_FAILED error handling");
+    }
+
+    DWORD exit_status;
+    if (!GetExitCodeProcess(handle, &exit_status))
+        TODO("GetExitCodeProcess error handling");
+
+    if (exit_status != 0)
+        TODO("exit_status != 0 error handling");
+
+    CloseHandle(handle);
+
+    return true;
+#else
     while (true)
     {
         int status = 0;
@@ -248,6 +276,7 @@ bool Process::await() const
             // TODO: error message
         }
     }
+#endif
 }
 
 NBSAPI bool await_processes(const std::vector<Process> &processes)
@@ -326,10 +355,55 @@ bool Cmd::run() const
 
 Process Cmd::run_async() const
 {
+    if (items.empty())
+        TODO("empty cmd error handling");
+
+    std::string args_str = to_string();
+    std::cout << args_str << '\n';
+
 #ifdef _WIN32
-#error run_async is not implemented on Windows
+    char *args = (char *)args_str.c_str(); // TODO: Proper Cmd.to_string
+    STARTUPINFO startupinfo;
+    ZeroMemory(&startupinfo, sizeof(startupinfo));
+    startupinfo.cb = sizeof(startupinfo);
+
+    startupinfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    if (startupinfo.hStdInput == INVALID_HANDLE_VALUE)
+    {
+        log::error(os::windows_last_error_str());
+        TODO("get input handle error handling");
+    }
+
+    startupinfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (startupinfo.hStdOutput == INVALID_HANDLE_VALUE)
+    {
+        log::error(os::windows_last_error_str());
+        TODO("get output handle error handling");
+    }
+
+    startupinfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    if (startupinfo.hStdError == INVALID_HANDLE_VALUE)
+    {
+        log::error(os::windows_last_error_str());
+        TODO("get error handle error handling");
+    }
+
+    startupinfo.dwFlags |= STARTF_USESTDHANDLES;
+
+    PROCESS_INFORMATION process_info;
+    ZeroMemory(&process_info, sizeof(process_info));
+
+    BOOL success = CreateProcessA(NULL, args, NULL, NULL, TRUE, 0, NULL, NULL, &startupinfo, &process_info);
+    if (!success)
+    {
+        log::error(os::windows_last_error_str());
+        TODO("CreateProcess error handling");
+    }
+
+    CloseHandle(process_info.hThread);
+
+    return process_info.hProcess;
 #else
-    std::cout << to_string() << '\n';
     int p = fork();
     if (p < 0)
     {
@@ -391,7 +465,12 @@ NBSAPI void self_update(int argc, char **argv, const std::string &source)
     std::filesystem::rename(exe, exe + ".old");
     {
         Cmd cmd;
-        cmd.append_many({c::comp_str(c::current_compiler()), source, "-o", exe});
+        cmd.append_many({c::comp_str(c::current_compiler()), source});
+#ifdef _MSC_VER
+        cmd.append_many({"-std:c++20", "-Fe:" + exe, "-FC", "-EHsc", "-nologo"});
+#else
+        cmd.append_many({"-o", exe});
+#endif
         cmd.run_or_die("Error during self_update!!!");
     }
     Cmd cmd;
@@ -408,6 +487,27 @@ NBSAPI void self_update(int argc, char **argv, const std::string &source)
 
 namespace nbs::os
 {
+#ifdef _WIN32
+std::string windows_error_code_to_str(DWORD error)
+{
+    // https://stackoverflow.com/questions/1387064/how-to-get-the-error-message-from-the-error-code-returned-by-getlasterror
+
+    LPSTR messageBuffer = nullptr;
+
+    DWORD size = FormatMessage(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, error,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), reinterpret_cast<LPSTR>(&messageBuffer), 0, nullptr);
+
+    return messageBuffer;
+}
+
+std::string windows_last_error_str()
+{
+    DWORD error = GetLastError();
+    return windows_error_code_to_str(error);
+}
+#endif
+
 Path::Path(const strvec &dirs)
 {
     this->dirs = dirs;
@@ -647,6 +747,7 @@ bool Target::build() const
     }
     return 0;
 }
+
 void TargetMap::insert(Target &target)
 {
     targets.insert({target.output.str(), target});
@@ -759,7 +860,7 @@ NBSAPI std::string comp_str(Compiler comp)
     case CLANG:
         return "clang";
     case MSVC:
-        TODO("msvc");
+        return "cl.exe";
     default:
         return "UNKNOWN COMPILER";
     }
@@ -790,6 +891,7 @@ NBSAPI CDefaults *get_cdefaults()
 
 Cmd CompileOptions::cmd(const os::pathvec &sources, const strvec &additional_flags) const
 {
+    // TODO: fucking windows pain
     Cmd cmd;
 
     cmd.append(comp_str(compiler));
@@ -817,7 +919,18 @@ Cmd CompileOptions::cmd(const strvec &sources, const strvec &additional_flags) c
 
 Cmd CompileOptions::exe_cmd(const os::Path &output, const os::pathvec &sources) const
 {
-    return this->cmd(sources, {"-o", output.str()});
+    strvec additional_flags;
+    if (compiler == MSVC)
+    {
+        additional_flags.emplace_back("-Fe:" + output.str());
+    }
+    else
+    {
+        additional_flags.emplace_back("-o");
+        additional_flags.emplace_back(output.str());
+    }
+
+    return this->cmd(sources, additional_flags);
 }
 
 Cmd CompileOptions::exe_cmd(const std::string &output, const strvec &sources) const
@@ -827,7 +940,18 @@ Cmd CompileOptions::exe_cmd(const std::string &output, const strvec &sources) co
 
 Cmd CompileOptions::obj_cmd(const os::Path &output, const os::Path &source) const
 {
-    return this->cmd({source}, {"-c", "-o", output.str()});
+    strvec additional_flags;
+    additional_flags.emplace_back("-c");
+    if (compiler == MSVC)
+    {
+        additional_flags.emplace_back("-Fo:" + output.str());
+    }
+    else
+    {
+        additional_flags.emplace_back("-o");
+        additional_flags.emplace_back(output.str());
+    }
+    return this->cmd({source}, additional_flags);
 }
 
 Cmd CompileOptions::obj_cmd(const std::string &output, const std::string &source) const
