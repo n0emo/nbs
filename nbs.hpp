@@ -30,12 +30,15 @@
 #define NBS_HPP
 
 #include <cassert>
+#include <exception>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #ifdef _WIN32
@@ -48,6 +51,16 @@
 
 #define NBSAPI static inline
 #define TODO(thing) assert(0 && thing "is not implemented.")
+
+// TODO: nbs::error with zig-like error union struct
+// TODO: multiprocessed target building
+// TODO: generate targets in nbs::c
+// TODO: determine user toolchain (compiler, etc.)
+// TODO: support for MSVC syntax
+// TODO: CLI class for easy CLI app building
+// TODO: extract OS related things from nbs to nbs::os
+// TODO: maybe nbs::unit for unit testing
+// TODO: nbs::config
 
 namespace nbs
 {
@@ -159,6 +172,13 @@ NBSAPI void warning(const std::string &message);
 NBSAPI void error(const std::string &message);
 } // namespace nbs::log
 
+namespace nbs::graph
+{
+template <typename T>
+NBSAPI std::optional<std::vector<std::vector<T>>> tolopogical_levels(
+    const std::unordered_map<T, std::unordered_set<T>> &graph, const T &root);
+} // namespace nbs::graph
+
 namespace nbs::target
 {
 struct Target
@@ -251,6 +271,7 @@ NBSAPI Compiler current_compiler();
 namespace nbs
 {
 static Defaults defaults;
+
 #ifdef _WIN32
 Process::Process(HANDLE handle) : handle(handle)
 {
@@ -753,6 +774,96 @@ NBSAPI void error(const std::string &message)
 }
 
 } // namespace nbs::log
+
+namespace nbs::graph
+{
+// TODO: error reporting
+template <typename T>
+NBSAPI std::optional<std::vector<std::vector<T>>> tolopogical_levels(
+    const std::unordered_map<T, std::unordered_set<T>> &graph, const T &root)
+{
+    class CycleException : public std::exception
+    {
+    };
+    class VertexNotFoundException : public std::exception
+    {
+    };
+
+    struct Vertex
+    {
+        const T &name;
+        const std::unordered_set<T> &edges;
+        std::optional<size_t> level;
+        bool traversing;
+
+        Vertex(const T &name, const std::unordered_set<T> &edges)
+            : name(name), edges(edges), level(std::nullopt), traversing(false)
+        {
+        }
+    };
+
+    std::unordered_map<T, Vertex> vertices;
+    for (const auto &pair : graph)
+    {
+        vertices.insert({pair.first, Vertex(pair.first, pair.second)});
+    }
+
+    size_t max_level = 0;
+
+    std::function<void(const T &, size_t)> do_search;
+
+    do_search = [&](const T &current_vertex_name, size_t level) {
+        auto vertex_search = vertices.find(current_vertex_name);
+        if (vertex_search == vertices.end())
+            throw VertexNotFoundException();
+
+        Vertex &vertex = vertex_search->second;
+
+        if (vertex.traversing)
+            throw CycleException();
+
+        vertex.traversing = true;
+
+        if (vertex.level.value_or(0) <= level)
+            vertex.level = level;
+
+        for (const T &edge : vertex.edges)
+        {
+            do_search(edge, level + 1);
+        }
+
+        vertex.traversing = false;
+
+        if (level > max_level)
+            max_level = level;
+    };
+
+    try
+    {
+        do_search(root, 0);
+    }
+    catch (CycleException)
+    {
+        return std::nullopt;
+    }
+    catch (VertexNotFoundException)
+    {
+        return std::nullopt;
+    }
+
+    std::vector<std::vector<T>> result(max_level + 1);
+
+    for (const auto &v : vertices)
+    {
+        if (!v.second.level.has_value())
+            continue;
+
+        result[*v.second.level].emplace_back(v.first);
+    }
+
+    return result;
+}
+} // namespace nbs::graph
 
 namespace nbs::target
 {

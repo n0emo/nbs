@@ -1,3 +1,5 @@
+#include <unordered_map>
+#include <unordered_set>
 #define NBS_IMPLEMENTATION
 #include "nbs.hpp"
 
@@ -19,8 +21,44 @@ void build()
     exe_proc.await();
 }
 
+void test_levels()
+{
+    std::unordered_map<std::string, std::unordered_set<std::string>> graph;
+    graph.insert({"1", {"2", "3", "4"}});
+    graph.insert({"2", {"4"}});
+    graph.insert({"3", {"4"}});
+    graph.insert({"4", {}});
+
+    auto result = nbs::graph::tolopogical_levels<std::string>(graph, "1").value();
+
+    for (const auto &pair : graph)
+    {
+        std::cout << pair.first << " ->";
+        for (const auto &edge : pair.second)
+        {
+            std::cout << " " << edge;
+        }
+        std::cout << '\n';
+    }
+
+    for (size_t level = 0; level < result.size(); level++)
+    {
+        std::cout << level << ":";
+        for (const auto &vertex : result[level])
+        {
+            std::cout << " " << vertex;
+        }
+        std::cout << '\n';
+    }
+    std::cout << std::endl;
+}
+
 int main(int argc, char **argv)
 {
+    log::info("Testing bfs");
+    test_levels();
+    return 0;
+
     os::Path build_path("build");
     info(("nbs" + build_path + "debug").str());
     self_update(argc, argv, __FILE__);

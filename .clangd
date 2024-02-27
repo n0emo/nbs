@@ -1,5 +1,5 @@
 CompileFlags:
-  Add: [-DNBS_IMPLEMENTATION]
+  Add: [-DNBS_IMPLEMENTATION -std=c++17]
 
 Diagnostics:
   # Remove: -Wmacro-redefined
