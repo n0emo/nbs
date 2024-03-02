@@ -1011,6 +1011,10 @@ NBSAPI Compiler current_compiler()
 #if defined __clang__ && !defined(__ibmxl__) && !defined(__CODEGEARC__)
     return CLANG;
 
+// MINGW32
+#elif defined(__MINGW32__)
+    TODO("mingw")
+
 //  GNU C++:
 #elif defined(__GNUC__) && !defined(__ibmxl__)
     return GXX;
