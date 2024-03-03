@@ -2,7 +2,7 @@
 #include "nbs.hpp"
 
 using namespace nbs;
-using namespace nbs::error;
+using namespace nbs::err;
 
 enum GetError
 {

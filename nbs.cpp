@@ -27,9 +27,25 @@ void test_levels()
     graph.insert({"1", {"2", "3", "4"}});
     graph.insert({"2", {"4"}});
     graph.insert({"3", {"4"}});
-    graph.insert({"4", {}});
+    // graph.insert({"4", {"1"}});
 
-    auto result = nbs::graph::tolopogical_levels<std::string>(graph, "1").value();
+    auto result = nbs::graph::topological_levels<std::string>(graph, "1");
+    if (result.is_err())
+    {
+        switch (result.error())
+        {
+        case nbs::graph::CycleDependency:
+            std::cout << "Cycle dependency detected" << std::endl;
+            break;
+        case nbs::graph::VertexNotFound:
+            std::cout << "Vertex not found" << std::endl;
+            break;
+        }
+
+        return;
+    }
+
+    auto levels = result.value();
 
     for (const auto &pair : graph)
     {
@@ -41,10 +57,10 @@ void test_levels()
         std::cout << '\n';
     }
 
-    for (size_t level = 0; level < result.size(); level++)
+    for (size_t level = 0; level < levels.size(); level++)
     {
         std::cout << level << ":";
-        for (const auto &vertex : result[level])
+        for (const auto &vertex : levels[level])
         {
             std::cout << " " << vertex;
         }

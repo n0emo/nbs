@@ -62,7 +62,7 @@
 // TODO: maybe nbs::unit for unit testing
 // TODO: nbs::config
 
-namespace nbs::error
+namespace nbs::err
 {
 template <typename T>
 struct Ok
@@ -129,7 +129,7 @@ class BadResultException : public std::exception
     BadResultException() = default;
     const char *what() const noexcept;
 };
-} // namespace nbs::error
+} // namespace nbs::err
 
 namespace nbs
 {
@@ -243,8 +243,14 @@ NBSAPI void error(const std::string &message);
 
 namespace nbs::graph
 {
+enum GraphError
+{
+    CycleDependency,
+    VertexNotFound
+};
+
 template <typename T>
-NBSAPI std::optional<std::vector<std::vector<T>>> tolopogical_levels(
+NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
     const std::unordered_map<T, std::unordered_set<T>> &graph, const T &root);
 } // namespace nbs::graph
 
@@ -337,7 +343,7 @@ NBSAPI Compiler current_compiler();
 
 #ifdef NBS_IMPLEMENTATION
 
-namespace nbs::error
+namespace nbs::err
 {
 
 template <typename T>
@@ -446,7 +452,7 @@ const char *BadResultException::what() const noexcept
 {
     return "Attempt to access bad result";
 }
-} // namespace nbs::error
+} // namespace nbs::err
 
 namespace nbs
 {
@@ -961,7 +967,7 @@ namespace nbs::graph
 {
 // TODO: error reporting
 template <typename T>
-NBSAPI std::optional<std::vector<std::vector<T>>> tolopogical_levels(
+NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
     const std::unordered_map<T, std::unordered_set<T>> &graph, const T &root)
 {
     class CycleException : public std::exception
@@ -1026,11 +1032,11 @@ NBSAPI std::optional<std::vector<std::vector<T>>> tolopogical_levels(
     }
     catch (CycleException)
     {
-        return std::nullopt;
+        return err::Err(CycleDependency);
     }
     catch (VertexNotFoundException)
     {
-        return std::nullopt;
+        return err::Err(VertexNotFound);
     }
 
     std::vector<std::vector<T>> result(max_level + 1);
@@ -1043,7 +1049,7 @@ NBSAPI std::optional<std::vector<std::vector<T>>> tolopogical_levels(
         result[*v.second.level].emplace_back(v.first);
     }
 
-    return result;
+    return err::Ok(result);
 }
 } // namespace nbs::graph
 
