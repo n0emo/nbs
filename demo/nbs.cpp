@@ -8,7 +8,7 @@ using namespace nbs::str;
 
 int main(int argc, char **argv)
 {
-    self_update(argc, argv, __FILE__);
+    self_update(argc, argv, __BASE_FILE__);
 
     make_directory_if_not_exists("build");
 

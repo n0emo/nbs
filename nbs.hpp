@@ -120,7 +120,7 @@ class Result
     constexpr V value_or(const V &default_value) const;
     constexpr E error() const;
     constexpr V &operator*();
-    constexpr V &operator->();
+    constexpr V *operator->();
 };
 
 class BadResultException : public std::exception
@@ -448,13 +448,13 @@ E constexpr Result<V, E>::error() const
 template <typename V, typename E>
 V constexpr &Result<V, E>::operator*()
 {
-    return *std::get_if<0>(variant);
+    return *std::get_if<0>(&variant);
 }
 
 template <typename V, typename E>
-V constexpr &Result<V, E>::operator->()
+V constexpr *Result<V, E>::operator->()
 {
-    return *std::get_if<0>(variant);
+    return std::get_if<0>(&variant);
 }
 
 const char *BadResultException::what() const noexcept
@@ -1156,26 +1156,56 @@ bool TargetMap::build_if_needs(const std::string &output) const
     if (!needs_rebuild(output))
         return true;
 
-    auto target = targets.find(output)->second;
-
-    for (const auto &dep : target.dependencies)
+    auto target = targets.find(output)->second; // TODO: error handling
+    graph::Graph<std::string> graph;
+    for (const auto &p : targets)
     {
-        if (targets.find(dep.str()) != targets.end())
+        graph::Edges<std::string> edges;
+        for (const auto &e : p.second.dependencies)
         {
-            int result = build_if_needs(dep.str());
-            if (!result)
-                return false;
+            edges.insert(e.str());
+            graph[e.str()];
         }
-        else if (!os::exists(dep))
+        graph[p.first] = edges;
+    }
+    auto levels_result = graph::topological_levels(graph, {target.output.str()});
+
+    if (levels_result.is_err())
+    {
+        // TODO: proper error reporting
+        switch (levels_result.error())
         {
-            return false;
+        case graph::CycleDependency:
+            log::error("Cycle dependency detected.");
+            break;
+        case graph::VertexNotFound:
+            log::error("Target not found.");
+            break;
         }
+
+        return false;
     }
 
-    for (const auto &cmd : target.cmds)
+    auto levels = *levels_result;
+
+    for (ssize_t i = levels_result->size() - 1; i >= 0; i--)
     {
-        int result = cmd.run();
-        if (!result)
+        std::vector<Process> processes;
+        for (const auto &t_name : levels[i])
+        {
+            if (auto t_search = targets.find(t_name); t_search != targets.end())
+            {
+                if (!needs_rebuild(t_name))
+                    continue;
+                auto t = t_search->second;
+                processes.emplace_back(t.cmds[0].run_async()); // TODO: multiple commands
+            }
+            else if (!os::exists(t_name))
+            {
+                return false;
+            }
+        }
+        if (!await_processes(processes))
             return false;
     }
     return true;
