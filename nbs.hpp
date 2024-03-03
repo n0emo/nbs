@@ -39,6 +39,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 #ifdef _WIN32
@@ -52,7 +53,6 @@
 #define NBSAPI static inline
 #define TODO(thing) assert(0 && thing "is not implemented.")
 
-// TODO: nbs::error with zig-like error union struct
 // TODO: multiprocessed target building
 // TODO: generate targets in nbs::c
 // TODO: determine user toolchain (compiler, etc.)
@@ -61,6 +61,75 @@
 // TODO: extract OS related things from nbs to nbs::os
 // TODO: maybe nbs::unit for unit testing
 // TODO: nbs::config
+
+namespace nbs::error
+{
+template <typename T>
+struct Ok
+{
+    T value;
+
+    Ok() = default;
+    ~Ok() = default;
+    Ok(const Ok &) = delete;
+    Ok(Ok &&) = delete;
+
+    Ok(const T &value);
+};
+
+template <>
+struct Ok<void>
+{
+    Ok() = default;
+    ~Ok() = default;
+    Ok(const Ok &) = delete;
+    Ok(Ok &&) = delete;
+};
+
+Ok() -> Ok<void>;
+
+template <typename T>
+struct Err
+{
+    T value;
+
+    Err() = default;
+    ~Err() = default;
+    Err(const Err &) = delete;
+    Err(Err &&) = delete;
+
+    Err(const T &value);
+};
+
+template <typename V, typename E>
+class Result
+{
+    std::variant<V, E> variant;
+
+  public:
+    constexpr Result();
+    constexpr Result(const Result &other);
+    constexpr Result(const std::variant<V, E> &variant);
+    constexpr Result(const Ok<V> &ok);
+    constexpr Result(const Err<E> &err);
+    constexpr Result &operator=(const Result &other);
+
+    constexpr bool is_ok() const;
+    constexpr bool is_err() const;
+    constexpr V value() const;
+    constexpr V value_or(const V &default_value) const;
+    constexpr E error() const;
+    constexpr V &operator*();
+    constexpr V &operator->();
+};
+
+class BadResultException : public std::exception
+{
+  public:
+    BadResultException() = default;
+    const char *what() const noexcept;
+};
+} // namespace nbs::error
 
 namespace nbs
 {
@@ -268,16 +337,129 @@ NBSAPI Compiler current_compiler();
 
 #ifdef NBS_IMPLEMENTATION
 
+namespace nbs::error
+{
+
+template <typename T>
+Ok<T>::Ok(const T &value)
+    : value(value)
+{
+}
+
+template <typename T>
+Err<T>::Err(const T &value)
+    : value(value)
+{
+}
+
+template <typename V, typename E>
+constexpr Result<V, E>::Result()
+    : variant()
+{
+}
+
+template <typename V, typename E>
+constexpr Result<V, E>::Result(const Result &other)
+    : variant(other.variant)
+{
+}
+
+template <typename V, typename E>
+constexpr Result<V, E>::Result(const std::variant<V, E> &variant)
+    : variant(variant)
+{
+}
+
+template <typename V, typename E>
+constexpr Result<V, E>::Result(const Ok<V> &ok)
+    : variant{std::in_place_index<0>, ok.value}
+{
+}
+
+template <typename V, typename E>
+constexpr Result<V, E>::Result(const Err<E> &err)
+    : variant{std::in_place_index<1>, err.value}
+{
+}
+
+template <typename V, typename E>
+Result<V, E> constexpr &Result<V, E>::operator=(const Result<V, E> &other)
+{
+    variant = other.variant;
+    return *this;
+}
+
+template <typename V, typename E>
+bool constexpr Result<V, E>::is_ok() const
+{
+    return variant.index() == 0;
+}
+
+template <typename V, typename E>
+bool constexpr Result<V, E>::is_err() const
+{
+    return variant.index() == 1;
+}
+
+template <typename V, typename E>
+V constexpr Result<V, E>::value() const
+{
+    if (!is_ok())
+        throw BadResultException();
+    return std::get<0>(variant);
+}
+
+template <typename V, typename E>
+V constexpr Result<V, E>::value_or(const V &default_value) const
+{
+    if (auto *v = std::get_if<0>(variant))
+    {
+        return *v;
+    }
+    else
+    {
+        return default_value;
+    }
+}
+
+template <typename V, typename E>
+E constexpr Result<V, E>::error() const
+{
+    if (!is_err())
+        throw BadResultException();
+    return std::get<1>(variant);
+}
+
+template <typename V, typename E>
+V constexpr &Result<V, E>::operator*()
+{
+    return *std::get_if<0>(variant);
+}
+
+template <typename V, typename E>
+V constexpr &Result<V, E>::operator->()
+{
+    return *std::get_if<0>(variant);
+}
+
+const char *BadResultException::what() const noexcept
+{
+    return "Attempt to access bad result";
+}
+} // namespace nbs::error
+
 namespace nbs
 {
 static Defaults defaults;
 
 #ifdef _WIN32
-Process::Process(HANDLE handle) : handle(handle)
+Process::Process(HANDLE handle)
+    : handle(handle)
 {
 }
 #else
-Process::Process(int pid) : pid(pid)
+Process::Process(int pid)
+    : pid(pid)
 {
 }
 #endif
