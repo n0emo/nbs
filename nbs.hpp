@@ -243,6 +243,12 @@ NBSAPI void error(const std::string &message);
 
 namespace nbs::graph
 {
+template <typename T>
+using Edges = std::unordered_set<T>;
+
+template <typename T>
+using Graph = std::unordered_map<T, Edges<T>>;
+
 enum GraphError
 {
     CycleDependency,
@@ -250,8 +256,11 @@ enum GraphError
 };
 
 template <typename T>
+NBSAPI std::unordered_set<T> find_roots(const Graph<T> &graph);
+
+template <typename T>
 NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
-    const std::unordered_map<T, std::unordered_set<T>> &graph, const T &root);
+    const Graph<T> &graph, const Edges<T> &roots);
 } // namespace nbs::graph
 
 namespace nbs::target
@@ -965,10 +974,30 @@ NBSAPI void error(const std::string &message)
 
 namespace nbs::graph
 {
-// TODO: error reporting
+template <typename T>
+NBSAPI std::unordered_set<T> find_roots(const Graph<T> &graph)
+{
+    std::unordered_set<T> result;
+
+    for (const auto &pair : graph)
+    {
+        result.insert(pair.first);
+    }
+
+    for (const auto &pair : graph)
+    {
+        for (const auto &vertex : pair.second)
+        {
+            result.erase(vertex);
+        }
+    }
+
+    return result;
+}
+
 template <typename T>
 NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
-    const std::unordered_map<T, std::unordered_set<T>> &graph, const T &root)
+    const Graph<T> &graph, const Edges<T> &roots)
 {
     class CycleException : public std::exception
     {
@@ -981,11 +1010,15 @@ NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
     {
         const T &name;
         const std::unordered_set<T> &edges;
-        std::optional<size_t> level;
+        std::optional<ssize_t> level;
         bool traversing;
 
-        Vertex(const T &name, const std::unordered_set<T> &edges)
+        Vertex(const T &name, const Edges<T> &edges)
             : name(name), edges(edges), level(std::nullopt), traversing(false)
+        {
+        }
+        Vertex(const T &name, const Edges<T> &edges, ssize_t level)
+            : name(name), edges(edges), level(level), traversing(false)
         {
         }
     };
@@ -996,39 +1029,39 @@ NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
         vertices.insert({pair.first, Vertex(pair.first, pair.second)});
     }
 
-    size_t max_level = 0;
+    ssize_t max_level = 0;
 
-    std::function<void(const T &, size_t)> do_search;
+    std::function<void(Vertex &, ssize_t)> do_search =
+        [&](Vertex &vertex, ssize_t level) {
+            if (vertex.traversing)
+                throw CycleException();
 
-    do_search = [&](const T &current_vertex_name, size_t level) {
-        auto vertex_search = vertices.find(current_vertex_name);
-        if (vertex_search == vertices.end())
-            throw VertexNotFoundException();
+            vertex.traversing = true;
 
-        Vertex &vertex = vertex_search->second;
+            if (vertex.level.value_or(-1) <= level)
+                vertex.level = level;
 
-        if (vertex.traversing)
-            throw CycleException();
+            for (const T &edge : vertex.edges)
+            {
+                auto vertex_search = vertices.find(edge);
+                if (vertex_search == vertices.end())
+                    throw VertexNotFoundException();
+                Vertex &v = vertex_search->second;
 
-        vertex.traversing = true;
+                do_search(v, level + 1);
+            }
 
-        if (vertex.level.value_or(0) <= level)
-            vertex.level = level;
+            vertex.traversing = false;
 
-        for (const T &edge : vertex.edges)
-        {
-            do_search(edge, level + 1);
-        }
+            if (level > max_level)
+                max_level = level;
+        };
 
-        vertex.traversing = false;
-
-        if (level > max_level)
-            max_level = level;
-    };
+    Vertex root("", roots);
 
     try
     {
-        do_search(root, 0);
+        do_search(root, -1);
     }
     catch (CycleException)
     {
@@ -1044,6 +1077,9 @@ NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
     for (const auto &v : vertices)
     {
         if (!v.second.level.has_value())
+            continue;
+
+        if (*v.second.level < 0)
             continue;
 
         result[*v.second.level].emplace_back(v.first);

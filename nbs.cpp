@@ -27,9 +27,11 @@ void test_levels()
     graph.insert({"1", {"2", "3", "4"}});
     graph.insert({"2", {"4"}});
     graph.insert({"3", {"4"}});
-    // graph.insert({"4", {"1"}});
+    graph.insert({"4", {}});
+    graph.insert({"5", {}});
 
-    auto result = nbs::graph::topological_levels<std::string>(graph, "1");
+    auto roots = nbs::graph::find_roots(graph);
+    auto result = nbs::graph::topological_levels<std::string>(graph, roots);
     if (result.is_err())
     {
         switch (result.error())
@@ -71,13 +73,13 @@ void test_levels()
 
 int main(int argc, char **argv)
 {
-    log::info("Testing bfs");
+    self_update(argc, argv, __FILE__);
+    log::info("Testing levels");
     test_levels();
     return 0;
 
     os::Path build_path("build");
     info(("nbs" + build_path + "debug").str());
-    self_update(argc, argv, __FILE__);
     info("Starting build");
 
     std::string subcommand;
