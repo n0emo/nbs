@@ -53,6 +53,7 @@
 #define NBSAPI static inline
 #define TODO(thing) assert(0 && thing "is not implemented.")
 
+// TODO: change Path to std::filesystem::path
 // TODO: multiprocessed target building
 // TODO: generate targets in nbs::c
 // TODO: determine user toolchain (compiler, etc.)
