@@ -29,6 +29,7 @@
 #ifndef NBS_HPP
 #define NBS_HPP
 
+#include <algorithm>
 #include <cassert>
 #include <exception>
 #include <filesystem>
@@ -193,6 +194,7 @@ struct Path
 {
     strvec dirs;
 
+    Path();
     Path(const strvec &dirs);
     Path(const std::string &path);
     Path(const Path &path);
@@ -269,8 +271,8 @@ namespace nbs::target
 struct Target
 {
     os::Path output;
-    os::pathvec dependencies;
     std::vector<Cmd> cmds;
+    os::pathvec dependencies;
 
     Target(const os::Path &output, const Cmd &cmd, const os::pathvec &dependencies = {});
     Target(const os::Path &output, const std::vector<Cmd> &cmds, const os::pathvec &dependencies = {});
@@ -684,7 +686,7 @@ std::unique_ptr<char *[]> Cmd::to_c_argv() const
         result[i] = (char *)items[i].c_str();
     }
     result[items.size()] = NULL;
-    return std::move(result);
+    return result;
 }
 
 NBSAPI std::optional<std::string> shift_args(int &argc, char **&argv)
@@ -722,7 +724,7 @@ NBSAPI void self_update(int argc, char **argv, const std::string &source)
     }
     Cmd cmd;
     cmd.append(exe);
-    for (size_t i = 1; i < argc; i++)
+    for (int i = 1; i < argc; i++)
     {
         cmd.append(argv[i]);
     }
@@ -754,6 +756,11 @@ std::string windows_last_error_str()
     return windows_error_code_to_str(error);
 }
 #endif
+
+Path::Path()
+{
+    this->dirs = strvec();
+}
 
 Path::Path(const strvec &dirs)
 {
@@ -817,11 +824,9 @@ NBSAPI strvec paths_to_strs(const pathvec &paths)
 
 NBSAPI pathvec strs_to_paths(const strvec &paths)
 {
-    pathvec result;
-    for (const Path &path : paths)
-    {
-        result.push_back(path);
-    }
+    size_t size = paths.size();
+    pathvec result(size);
+    std::copy_n(paths.begin(), size, result.begin());
     return result;
 }
 
@@ -872,7 +877,7 @@ NBSAPI std::string join(const std::string &sep, const strvec &strings)
 
 NBSAPI std::string trim_to(const std::string &str, const std::string &chars)
 {
-    return trim_right_to(trim_left_to(str));
+    return trim_right_to(trim_left_to(str), chars);
 }
 
 NBSAPI std::string trim_right_to(const std::string &str, const std::string &chars)
@@ -1064,11 +1069,11 @@ NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
     {
         do_search(root, -1);
     }
-    catch (CycleException)
+    catch (CycleException *)
     {
         return err::Err(CycleDependency);
     }
-    catch (VertexNotFoundException)
+    catch (VertexNotFoundException *)
     {
         return err::Err(VertexNotFound);
     }
@@ -1103,7 +1108,7 @@ Target::Target(const os::Path &output, const std::vector<Cmd> &cmds, const os::p
 
 bool Target::build() const
 {
-    for (const auto cmd : cmds)
+    for (const auto &cmd : cmds)
     {
         int result = cmd.run();
         if (!result)
@@ -1224,9 +1229,9 @@ bool TargetMap::needs_rebuild(const std::string &output) const
 
     for (const auto &dep : target.dependencies)
     {
-        if ((targets.find(dep.str()) != targets.end() && needs_rebuild(dep.str())) ||
-            (targets.find(dep.str()) != targets.end() && !std::filesystem::exists(dep.str()) ||
-             (std::filesystem::exists(dep.str()) && os::compare_last_mod_time(output, dep.str()) < 0)))
+        if (((targets.find(dep.str()) != targets.end()) && needs_rebuild(dep.str())) ||
+            (((targets.find(dep.str()) != targets.end()) && !std::filesystem::exists(dep.str())) ||
+             (std::filesystem::exists(dep.str()) && (os::compare_last_mod_time(output, dep.str()) < 0))))
         {
             return true;
         }
