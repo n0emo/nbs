@@ -78,8 +78,8 @@ int main(int argc, char **argv)
     test_levels();
     return 0;
 
-    os::Path build_path("build");
-    info(("nbs" + build_path + "debug").str());
+    os::path build_path("build");
+    info("nbs" / build_path / "debug");
     info("Starting build");
 
     std::string subcommand;
