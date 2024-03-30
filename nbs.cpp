@@ -15,10 +15,11 @@ void build()
     };
 
     auto obj_proc = options.obj_cmd("hello.o", "hello.cpp").run_async();
-    if (!obj_proc.await())
+    if (obj_proc.bind<void>([](auto p) { return p.await(); }).is_err())
         return;
+
     auto exe_proc = options.exe_cmd("hello", {"hello.o"}).run_async();
-    exe_proc.await();
+    exe_proc.bind<void>([](auto p) { return p.await(); });
 }
 
 void test_levels()

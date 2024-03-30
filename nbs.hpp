@@ -59,7 +59,6 @@
 // TODO: determine user toolchain (compiler, etc.)
 // TODO: support for MSVC syntax
 // TODO: CLI class for easy CLI app building
-// TODO: extract OS related things from nbs to nbs::os
 // TODO: maybe nbs::unit for unit testing
 // TODO: nbs::config
 
@@ -128,6 +127,26 @@ class Result
     constexpr E error() const;
     constexpr V &operator*();
     constexpr V *operator->();
+
+    template <typename NewV>
+    Result<NewV, E> bind(std::function<Result<NewV, E>(V)> func);
+};
+
+template <typename E>
+class Result<void, E>
+{
+    std::optional<E> m_error;
+
+  public:
+    constexpr Result() = default; // TODO: consider delete
+    constexpr Result(const Result &other);
+    constexpr Result(const Ok<void> &);
+    constexpr Result(const Err<E> &err);
+    constexpr Result &operator=(const Result &other);
+
+    constexpr bool is_ok() const;
+    constexpr bool is_err() const;
+    constexpr E error() const;
 };
 
 class BadResultException : public std::exception
@@ -142,6 +161,21 @@ namespace os
 {
 using path = std::filesystem::path;
 
+enum ProcessError
+{
+    PROCESS_WAIT_ERROR,
+    PROCESS_EXIT_STATUS_ERROR,
+    PROCESS_EMPTY_CMD_ERROR,
+    PROCESS_CREATE_ERROR,
+#ifdef _WIN32
+    PROCESS_GET_EXIT_CODE_ERROR,
+    PROCESS_GET_HANDLE_ERROR,
+#else
+    PROCESS_SIGNAL_ERROR,
+    PROCESS_EXEC_ERROR,
+#endif
+};
+
 struct Process
 {
 #ifdef _WIN32
@@ -151,7 +185,7 @@ struct Process
     int pid;
     Process(int pid);
 #endif
-    bool await() const;
+    err::Result<void, ProcessError> await() const;
 };
 
 struct Cmd
@@ -167,20 +201,17 @@ struct Cmd
     void append_many_prefixed(const std::string &prefix, const strvec &items);
 
     std::string to_string() const;
-    bool run() const;
-    Process run_async() const;
+    err::Result<void, ProcessError> run() const;
+    err::Result<Process, ProcessError> run_async() const;
     void run_or_die(const std::string &message) const;
     std::unique_ptr<char *[]> to_c_argv() const;
 };
 
-NBSAPI bool await_processes(const std::vector<Process> &processes);
+NBSAPI err::Result<void, ProcessError> await_processes(const std::vector<Process> &processes);
 
 #ifdef _WIN32
-const std::string path_sep("\\");
 std::string windows_error_code_to_str(DWORD error);
 std::string windows_last_error_str();
-#else
-const std::string path_sep("/");
 #endif
 
 typedef std::vector<path> pathvec;
@@ -242,6 +273,13 @@ NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
 
 namespace target
 {
+enum BuildError
+{
+    BUILD_CMD_ERROR,
+    BUILD_NO_RULE_FOR_TARGET_ERROR,
+    BUILD_CYCLE_DEPENDENCY_ERROR,
+};
+
 struct Target
 {
     os::path output;
@@ -251,7 +289,7 @@ struct Target
     Target(const os::path &output, const os::Cmd &cmd, const os::pathvec &dependencies = {});
     Target(const os::path &output, const std::vector<os::Cmd> &cmds, const os::pathvec &dependencies = {});
 
-    bool build() const;
+    err::Result<void, os::ProcessError> build() const;
 };
 
 struct TargetMap
@@ -262,8 +300,8 @@ struct TargetMap
 
     void insert(Target &target);
     bool remove(const std::string &target);
-    bool build(const std::string &output) const;
-    bool build_if_needs(const std::string &output) const;
+    err::Result<void, BuildError> build(const std::string &output) const;
+    err::Result<void, BuildError> build_if_needs(const std::string &output) const;
     bool needs_rebuild(const std::string &output) const;
 };
 } // namespace target
@@ -431,6 +469,65 @@ V constexpr *Result<V, E>::operator->()
     return std::get_if<0>(&variant);
 }
 
+template <typename V, typename E>
+template <typename NewV>
+Result<NewV, E> Result<V, E>::bind(std::function<Result<NewV, E>(V)> func)
+{
+    if (auto value = std::get_if<0>(&variant))
+    {
+        return func(*value);
+    }
+    else
+    {
+        return err::Err(std::get<1>(variant));
+    }
+}
+
+template <typename E>
+constexpr Result<void, E>::Result(const Result &other)
+    : m_error(other.m_error)
+{
+}
+
+template <typename E>
+constexpr Result<void, E>::Result(const Ok<void> &)
+    : m_error(std::nullopt)
+{
+}
+
+template <typename E>
+constexpr Result<void, E>::Result(const Err<E> &err)
+    : m_error(err.value)
+{
+}
+
+template <typename E>
+Result<void, E> constexpr &Result<void, E>::operator=(const Result &other)
+{
+    m_error = other.m_error;
+    return *this;
+}
+
+template <typename E>
+bool constexpr Result<void, E>::is_ok() const
+{
+    return !m_error.has_value();
+}
+
+template <typename E>
+bool constexpr Result<void, E>::is_err() const
+{
+    return m_error.has_value();
+}
+
+template <typename E>
+E constexpr Result<void, E>::error() const
+{
+    if (!is_err())
+        throw BadResultException();
+    return *m_error;
+}
+
 const char *BadResultException::what() const noexcept
 {
     return "Attempt to access bad result";
@@ -446,23 +543,22 @@ NBSAPI void self_update(int argc, char **argv, const std::string &source)
 
     log::info("Updating");
     std::filesystem::rename(exe, exe + ".old");
-    {
-        os::Cmd cmd;
-        cmd.append_many({c::comp_str(c::current_compiler()), source});
+
+    os::Cmd compile_cmd;
+    compile_cmd.append_many({c::comp_str(c::current_compiler()), source});
 #ifdef _MSC_VER
-        cmd.append_many({"-std:c++20", "-Fe:" + exe, "-FC", "-EHsc", "-nologo"});
+    cmd.append_many({"-std:c++20", "-Fe:" + exe, "-FC", "-EHsc", "-nologo"});
 #else
-        cmd.append_many({"-o", exe});
+    compile_cmd.append_many({"-o", exe});
 #endif
-        cmd.run_or_die("Error during self_update!!!");
-    }
-    os::Cmd cmd;
-    cmd.append(exe);
+    compile_cmd.run_or_die("Error during self_update!!!");
+
+    os::Cmd exe_cmd(exe);
     for (int i = 1; i < argc; i++)
     {
-        cmd.append(argv[i]);
+        exe_cmd.append(argv[i]);
     }
-    cmd.run();
+    exe_cmd.run();
 
     exit(0);
 }
@@ -481,7 +577,7 @@ Process::Process(int pid)
 }
 #endif
 
-bool Process::await() const
+err::Result<void, ProcessError> Process::await() const
 {
 #ifdef _WIN32
     DWORD result = WaitForSingleObject(handle, INFINITE);
@@ -489,52 +585,55 @@ bool Process::await() const
     if (result == WAIT_FAILED)
     {
         log::error(os::windows_last_error_str());
-        TODO("WAIT_FAILED error handling");
+        return err::Err(PROCESS_WAIT_ERROR);
     }
 
     DWORD exit_status;
     if (!GetExitCodeProcess(handle, &exit_status))
-        TODO("GetExitCodeProcess error handling");
+        return err::Err(PROCESS_GET_EXIT_CODE_ERROR);
 
     if (exit_status != 0)
-        TODO("exit_status != 0 error handling");
+        return err::Err(PROCESS_EXIT_STATUS_ERROR);
 
     CloseHandle(handle);
 
-    return true;
+    return err::Ok();
 #else
     while (true)
     {
         int status = 0;
         if (waitpid(pid, &status, 0) < 0)
         {
-            TODO("waitpid error handling");
+            return err::Err(PROCESS_WAIT_ERROR);
         }
 
         if (WIFEXITED(status))
         {
             int exit_status = WEXITSTATUS(status);
-            return exit_status == 0;
-            // TODO: error message
+            if (exit_status == 0)
+                return err::Ok();
+            else
+                return err::Err(PROCESS_EXIT_STATUS_ERROR);
         }
 
         if (WIFSIGNALED(status))
         {
-            return false;
-            // TODO: error message
+            return err::Err(PROCESS_WAIT_ERROR);
         }
     }
 #endif
 }
 
-NBSAPI bool await_processes(const std::vector<Process> &processes)
+NBSAPI err::Result<void, ProcessError> await_processes(const std::vector<Process> &processes)
 {
-    bool result = true;
+    err::Result<void, ProcessError> result = err::Ok();
+
     for (const auto &proc : processes)
     {
-        if (!proc.await())
+        result = proc.await();
+        if (result.is_err())
         {
-            result = false;
+            return result;
         }
     }
     return result;
@@ -591,15 +690,16 @@ std::string Cmd::to_string() const
     return ss.str();
 }
 
-bool Cmd::run() const
+err::Result<void, ProcessError> Cmd::run() const
 {
-    return run_async().await();
+    return run_async().bind<void>(
+        [](auto p) { return p.await(); });
 }
 
-Process Cmd::run_async() const
+err::Result<Process, ProcessError> Cmd::run_async() const
 {
     if (items.empty())
-        TODO("empty cmd error handling");
+        return err::Err(PROCESS_EMPTY_CMD_ERROR);
 
     std::string args_str = to_string();
     std::cout << args_str << '\n';
@@ -613,22 +713,19 @@ Process Cmd::run_async() const
     startupinfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     if (startupinfo.hStdInput == INVALID_HANDLE_VALUE)
     {
-        log::error(os::windows_last_error_str());
-        TODO("get input handle error handling");
+        return err::Err(PROCESS_GET_HANDLE_ERROR);
     }
 
     startupinfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
     if (startupinfo.hStdOutput == INVALID_HANDLE_VALUE)
     {
-        log::error(os::windows_last_error_str());
-        TODO("get output handle error handling");
+        return err::Err(PROCESS_GET_HANDLE_ERROR);
     }
 
     startupinfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     if (startupinfo.hStdError == INVALID_HANDLE_VALUE)
     {
-        log::error(os::windows_last_error_str());
-        TODO("get error handle error handling");
+        return err::Err(PROCESS_GET_HANDLE_ERROR);
     }
 
     startupinfo.dwFlags |= STARTF_USESTDHANDLES;
@@ -639,8 +736,7 @@ Process Cmd::run_async() const
     BOOL success = CreateProcessA(NULL, args, NULL, NULL, TRUE, 0, NULL, NULL, &startupinfo, &process_info);
     if (!success)
     {
-        log::error(os::windows_last_error_str());
-        TODO("CreateProcess error handling");
+        return err::Err(PROCESS_CREATE_ERROR);
     }
 
     CloseHandle(process_info.hThread);
@@ -650,22 +746,22 @@ Process Cmd::run_async() const
     int p = fork();
     if (p < 0)
     {
-        TODO("run async error handling");
+        return err::Err(PROCESS_CREATE_ERROR);
     }
     else if (p == 0)
     {
         auto args = to_c_argv();
         execvp(args[0], args.get());
-        TODO("error handling of execvp");
+        return err::Err(PROCESS_EXEC_ERROR);
     }
 
-    return p;
+    return err::Ok(Process(p));
 #endif
 }
 
 void Cmd::run_or_die(const std::string &message) const
 {
-    if (!run())
+    if (run().is_err())
     {
         nbs::log::error(message);
         exit(1);
@@ -993,15 +1089,16 @@ Target::Target(const os::path &output, const std::vector<os::Cmd> &cmds, const o
 {
 }
 
-bool Target::build() const
+err::Result<void, os::ProcessError> Target::build() const
 {
+    err::Result<void, os::ProcessError> result;
     for (const auto &cmd : cmds)
     {
-        int result = cmd.run();
-        if (!result)
+        result = cmd.run();
+        if (result.is_err())
             return result;
     }
-    return 0;
+    return result;
 }
 
 void TargetMap::insert(Target &target)
@@ -1014,40 +1111,34 @@ bool TargetMap::remove(const std::string &target_output)
     return targets.erase(target_output) > 0;
 }
 
-bool TargetMap::build(const std::string &output) const
+err::Result<void, BuildError> TargetMap::build(const std::string &output) const
 {
     auto target_it = targets.find(output);
     if (target_it == targets.end())
-        return false;
+        return err::Err(BUILD_NO_RULE_FOR_TARGET_ERROR);
     auto target = target_it->second;
 
     for (const auto &dep : target.dependencies)
     {
-        if (targets.find(dep) != targets.end())
-        {
-            int result = build(dep);
-            if (!result)
-                return false;
-        }
-        else if (!os::exists(dep))
-        {
-            return false;
-        }
+        if (os::exists(dep))
+            continue;
+
+        auto result = build(dep);
+        if (result.is_err())
+            return result;
     }
 
-    for (const auto &cmd : target.cmds)
-    {
-        int result = cmd.run();
-        if (!result)
-            return false;
-    }
-    return true;
+    auto build_result = target.build();
+    if (build_result.error())
+        return err::Err(BUILD_CMD_ERROR);
+
+    return err::Ok();
 }
 
-bool TargetMap::build_if_needs(const std::string &output) const
+err::Result<void, BuildError> TargetMap::build_if_needs(const std::string &output) const
 {
     if (!needs_rebuild(output))
-        return true;
+        return err::Ok();
 
     auto target = targets.find(output)->second; // TODO: error handling
     graph::Graph<std::string> graph;
@@ -1065,18 +1156,15 @@ bool TargetMap::build_if_needs(const std::string &output) const
 
     if (levels_result.is_err())
     {
-        // TODO: proper error reporting
         switch (levels_result.error())
         {
         case graph::CycleDependency:
-            log::error("Cycle dependency detected.");
-            break;
+            return err::Err(BUILD_CYCLE_DEPENDENCY_ERROR);
         case graph::VertexNotFound:
-            log::error("Target not found.");
-            break;
+            return err::Err(BUILD_NO_RULE_FOR_TARGET_ERROR);
+        default:
+            assert(0 && "Unreachable");
         }
-
-        return false;
     }
 
     auto levels = *levels_result;
@@ -1091,17 +1179,21 @@ bool TargetMap::build_if_needs(const std::string &output) const
                 if (!needs_rebuild(t_name))
                     continue;
                 auto t = t_search->second;
-                processes.emplace_back(t.cmds[0].run_async()); // TODO: multiple commands
+                auto p_result = t.cmds[0].run_async();
+                if (p_result.is_err())
+                    return err::Err(BUILD_CMD_ERROR);
+                processes.emplace_back(p_result.value()); // TODO: multiple commands
             }
             else if (!os::exists(t_name))
             {
-                return false;
+                return err::Err(BUILD_NO_RULE_FOR_TARGET_ERROR);
             }
         }
-        if (!await_processes(processes))
-            return false;
+        auto await_result = await_processes(processes);
+        if (await_result.is_err())
+            return err::Err(BUILD_CMD_ERROR);
     }
-    return true;
+    return err::Ok();
 }
 
 bool TargetMap::needs_rebuild(const std::string &output) const
