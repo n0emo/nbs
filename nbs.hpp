@@ -63,7 +63,13 @@
 // TODO: maybe nbs::unit for unit testing
 // TODO: nbs::config
 
-namespace nbs::err
+namespace nbs
+{
+typedef std::vector<std::string> strvec;
+
+NBSAPI void self_update(int argc, char **argv, const std::string &source);
+
+namespace err
 {
 template <typename T>
 struct Ok
@@ -130,11 +136,11 @@ class BadResultException : public std::exception
     BadResultException() = default;
     const char *what() const noexcept;
 };
-} // namespace nbs::err
+} // namespace err
 
-namespace nbs
+namespace os
 {
-typedef std::vector<std::string> strvec;
+using path = std::filesystem::path;
 
 struct Process
 {
@@ -167,21 +173,8 @@ struct Cmd
     std::unique_ptr<char *[]> to_c_argv() const;
 };
 
-struct Defaults
-{
-    std::string build_path = "";
-};
-
 NBSAPI bool await_processes(const std::vector<Process> &processes);
-NBSAPI Defaults *get_defaults();
-NBSAPI std::optional<std::string> shift_args(int &argc, char **&argv);
-NBSAPI void self_update(int argc, char **argv, const std::string &source);
 
-}; // namespace nbs
-
-namespace nbs::os
-{
-using path = std::filesystem::path;
 #ifdef _WIN32
 const std::string path_sep("\\");
 std::string windows_error_code_to_str(DWORD error);
@@ -197,9 +190,9 @@ NBSAPI pathvec strs_to_paths(const strvec &paths);
 NBSAPI long compare_last_mod_time(const path &path1, const path &path2);
 NBSAPI bool make_directory_if_not_exists(const path &path);
 NBSAPI bool exists(const path &path);
-} // namespace nbs::os
+} // namespace os
 
-namespace nbs::str
+namespace str
 {
 NBSAPI std::string join(const std::string &sep, const strvec &strings);
 NBSAPI std::string trim_to(const std::string &str, const std::string &chars = "\n\r ");
@@ -207,9 +200,9 @@ NBSAPI std::string trim_right_to(const std::string &str, const std::string &char
 NBSAPI std::string trim_left_to(const std::string &str, const std::string &chars = "\n\r ");
 NBSAPI strvec split(const std::string &str, const std::string &delim);
 NBSAPI std::string change_extension(const std::string &file, const std::string &new_extension);
-} // namespace nbs::str
+} // namespace str
 
-namespace nbs::log
+namespace log
 {
 enum LogLevel
 {
@@ -223,9 +216,9 @@ NBSAPI void log(LogLevel level, const std::string &message);
 NBSAPI void info(const std::string &message);
 NBSAPI void warning(const std::string &message);
 NBSAPI void error(const std::string &message);
-} // namespace nbs::log
+} // namespace log
 
-namespace nbs::graph
+namespace graph
 {
 template <typename T>
 using Edges = std::unordered_set<T>;
@@ -245,18 +238,18 @@ NBSAPI std::unordered_set<T> find_roots(const Graph<T> &graph);
 template <typename T>
 NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
     const Graph<T> &graph, const Edges<T> &roots);
-} // namespace nbs::graph
+} // namespace graph
 
-namespace nbs::target
+namespace target
 {
 struct Target
 {
     os::path output;
-    std::vector<Cmd> cmds;
+    std::vector<os::Cmd> cmds;
     os::pathvec dependencies;
 
-    Target(const os::path &output, const Cmd &cmd, const os::pathvec &dependencies = {});
-    Target(const os::path &output, const std::vector<Cmd> &cmds, const os::pathvec &dependencies = {});
+    Target(const os::path &output, const os::Cmd &cmd, const os::pathvec &dependencies = {});
+    Target(const os::path &output, const std::vector<os::Cmd> &cmds, const os::pathvec &dependencies = {});
 
     bool build() const;
 };
@@ -273,9 +266,9 @@ struct TargetMap
     bool build_if_needs(const std::string &output) const;
     bool needs_rebuild(const std::string &output) const;
 };
-} // namespace nbs::target
+} // namespace target
 
-namespace nbs::c
+namespace c
 {
 enum Compiler
 {
@@ -311,17 +304,18 @@ struct CompileOptions
     strvec defines = get_cdefaults()->defines;
     strvec other_flags = get_cdefaults()->other_flags;
 
-    Cmd cmd(const os::pathvec &sources, const strvec &additional_flags = {}) const;
-    Cmd exe_cmd(const os::path &output, const os::pathvec &sources) const;
-    Cmd obj_cmd(const os::path &output, const os::path &source) const;
-    Cmd static_lib_cmd(const os::pathvec &sources) const;  // TODO
-    Cmd dynamic_lib_cmd(const os::pathvec &sources) const; // TODO
+    os::Cmd cmd(const os::pathvec &sources, const strvec &additional_flags = {}) const;
+    os::Cmd exe_cmd(const os::path &output, const os::pathvec &sources) const;
+    os::Cmd obj_cmd(const os::path &output, const os::path &source) const;
+    os::Cmd static_lib_cmd(const os::pathvec &sources) const;  // TODO
+    os::Cmd dynamic_lib_cmd(const os::pathvec &sources) const; // TODO
 };
 
 NBSAPI std::string comp_str(Compiler comp);
 NBSAPI Compiler current_compiler();
 
-} // namespace nbs::c
+} // namespace c
+}; // namespace nbs
 
 // -------------------------------
 //
@@ -331,9 +325,10 @@ NBSAPI Compiler current_compiler();
 
 #ifdef NBS_IMPLEMENTATION
 
-namespace nbs::err
+namespace nbs
 {
-
+namespace err
+{
 template <typename T>
 Ok<T>::Ok(const T &value)
     : value(value)
@@ -440,12 +435,40 @@ const char *BadResultException::what() const noexcept
 {
     return "Attempt to access bad result";
 }
-} // namespace nbs::err
-
-namespace nbs
+} // namespace err
+NBSAPI void self_update(int argc, char **argv, const std::string &source)
 {
-static Defaults defaults;
+    assert(argc > 0);
+    std::string exe(argv[0]);
 
+    if (os::compare_last_mod_time(source, exe) < 0)
+        return;
+
+    log::info("Updating");
+    std::filesystem::rename(exe, exe + ".old");
+    {
+        os::Cmd cmd;
+        cmd.append_many({c::comp_str(c::current_compiler()), source});
+#ifdef _MSC_VER
+        cmd.append_many({"-std:c++20", "-Fe:" + exe, "-FC", "-EHsc", "-nologo"});
+#else
+        cmd.append_many({"-o", exe});
+#endif
+        cmd.run_or_die("Error during self_update!!!");
+    }
+    os::Cmd cmd;
+    cmd.append(exe);
+    for (int i = 1; i < argc; i++)
+    {
+        cmd.append(argv[i]);
+    }
+    cmd.run();
+
+    exit(0);
+}
+
+namespace os
+{
 #ifdef _WIN32
 Process::Process(HANDLE handle)
     : handle(handle)
@@ -515,11 +538,6 @@ NBSAPI bool await_processes(const std::vector<Process> &processes)
         }
     }
     return result;
-}
-
-NBSAPI Defaults *get_defaults()
-{
-    return &defaults;
 }
 
 Cmd::Cmd()
@@ -665,53 +683,6 @@ std::unique_ptr<char *[]> Cmd::to_c_argv() const
     return result;
 }
 
-NBSAPI std::optional<std::string> shift_args(int &argc, char **&argv)
-{
-    if (argc == 0)
-    {
-        return std::nullopt;
-    }
-
-    std::string result(*argv);
-    argv++;
-    argc--;
-    return result;
-}
-
-NBSAPI void self_update(int argc, char **argv, const std::string &source)
-{
-    assert(argc > 0);
-    std::string exe(argv[0]);
-
-    if (os::compare_last_mod_time(source, exe) < 0)
-        return;
-
-    log::info("Updating");
-    std::filesystem::rename(exe, exe + ".old");
-    {
-        Cmd cmd;
-        cmd.append_many({c::comp_str(c::current_compiler()), source});
-#ifdef _MSC_VER
-        cmd.append_many({"-std:c++20", "-Fe:" + exe, "-FC", "-EHsc", "-nologo"});
-#else
-        cmd.append_many({"-o", exe});
-#endif
-        cmd.run_or_die("Error during self_update!!!");
-    }
-    Cmd cmd;
-    cmd.append(exe);
-    for (int i = 1; i < argc; i++)
-    {
-        cmd.append(argv[i]);
-    }
-    cmd.run();
-
-    exit(0);
-}
-} // namespace nbs
-
-namespace nbs::os
-{
 #ifdef _WIN32
 std::string windows_error_code_to_str(DWORD error)
 {
@@ -768,9 +739,9 @@ NBSAPI bool exists(const path &path)
 {
     return std::filesystem::exists(path);
 }
-} // namespace nbs::os
+} // namespace os
 
-namespace nbs::str
+namespace str
 {
 NBSAPI std::string join(const std::string &sep, const strvec &strings)
 {
@@ -848,9 +819,9 @@ NBSAPI std::string change_extension(const std::string &file, const std::string &
 {
     return trim_right_to(file, ".") + new_extension;
 }
-} // namespace nbs::str
+} // namespace str
 
-namespace nbs::log
+namespace log
 {
 static LogLevel minimal_level = Info;
 
@@ -892,9 +863,9 @@ NBSAPI void error(const std::string &message)
     log(Error, message);
 }
 
-} // namespace nbs::log
+} // namespace log
 
-namespace nbs::graph
+namespace graph
 {
 template <typename T>
 NBSAPI std::unordered_set<T> find_roots(const Graph<T> &graph)
@@ -1009,15 +980,15 @@ NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
 
     return err::Ok(result);
 }
-} // namespace nbs::graph
+} // namespace graph
 
-namespace nbs::target
+namespace target
 {
-Target::Target(const os::path &output, const Cmd &cmd, const os::pathvec &dependencies)
+Target::Target(const os::path &output, const os::Cmd &cmd, const os::pathvec &dependencies)
     : output(output), cmds({cmd}), dependencies(dependencies)
 {
 }
-Target::Target(const os::path &output, const std::vector<Cmd> &cmds, const os::pathvec &dependencies)
+Target::Target(const os::path &output, const std::vector<os::Cmd> &cmds, const os::pathvec &dependencies)
     : output(output), cmds(cmds), dependencies(dependencies)
 {
 }
@@ -1112,7 +1083,7 @@ bool TargetMap::build_if_needs(const std::string &output) const
 
     for (ssize_t i = levels_result->size() - 1; i >= 0; i--)
     {
-        std::vector<Process> processes;
+        std::vector<os::Process> processes;
         for (const auto &t_name : levels[i])
         {
             if (auto t_search = targets.find(t_name); t_search != targets.end())
@@ -1154,9 +1125,9 @@ bool TargetMap::needs_rebuild(const std::string &output) const
     }
     return false;
 }
-} // namespace nbs::target
+} // namespace target
 
-namespace nbs::c
+namespace c
 {
 static CDefaults cdefaults;
 
@@ -1208,10 +1179,10 @@ NBSAPI CDefaults *get_cdefaults()
     return &cdefaults;
 }
 
-Cmd CompileOptions::cmd(const os::pathvec &sources, const strvec &additional_flags) const
+os::Cmd CompileOptions::cmd(const os::pathvec &sources, const strvec &additional_flags) const
 {
     // TODO: fucking windows pain
-    Cmd cmd;
+    os::Cmd cmd;
 
     cmd.append(comp_str(compiler));
     if (!standard.empty())
@@ -1231,7 +1202,7 @@ Cmd CompileOptions::cmd(const os::pathvec &sources, const strvec &additional_fla
     return cmd;
 }
 
-Cmd CompileOptions::exe_cmd(const os::path &output, const os::pathvec &sources) const
+os::Cmd CompileOptions::exe_cmd(const os::path &output, const os::pathvec &sources) const
 {
     strvec additional_flags;
     if (compiler == MSVC)
@@ -1247,9 +1218,7 @@ Cmd CompileOptions::exe_cmd(const os::path &output, const os::pathvec &sources) 
     return this->cmd(sources, additional_flags);
 }
 
-// TODO: exe_cmd
-
-Cmd CompileOptions::obj_cmd(const os::path &output, const os::path &source) const
+os::Cmd CompileOptions::obj_cmd(const os::path &output, const os::path &source) const
 {
     strvec additional_flags;
     additional_flags.emplace_back("-c");
@@ -1264,7 +1233,7 @@ Cmd CompileOptions::obj_cmd(const os::path &output, const os::path &source) cons
     }
     return this->cmd({source}, additional_flags);
 }
-} // namespace nbs::c
-
+} // namespace c
+} // namespace nbs
 #endif // NBS_IMPLEMENTATION
 #endif // NBS_HPP
