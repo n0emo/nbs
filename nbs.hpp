@@ -29,8 +29,9 @@
 #ifndef NBS_HPP
 #define NBS_HPP
 
-#include <algorithm>
 #include <cassert>
+
+#include <algorithm>
 #include <exception>
 #include <filesystem>
 #include <functional>
