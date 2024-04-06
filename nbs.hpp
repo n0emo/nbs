@@ -51,6 +51,12 @@
 #include <unistd.h>
 #endif
 
+#if __cpp_exceptions
+	#define NBS_THROW(E) throw E
+#else
+	#define NBS_THROW(E) abort()
+#endif
+
 #define NBSAPI static inline
 #define TODO(thing) assert(0 && thing "is not implemented.")
 
@@ -61,7 +67,6 @@
 // TODO: CLI class for easy CLI app building
 // TODO: maybe nbs::unit for unit testing
 // TODO: nbs::config
-// TODO: make compilable with -fno-exceptions
 // TODO: cover nbs with tests
 // TODO: properly annotate
 // TODO: use string_view
@@ -437,7 +442,7 @@ template <typename V, typename E>
 V constexpr Result<V, E>::value() const
 {
     if (!is_ok())
-        throw BadResultException();
+        NBS_THROW(BadResultException());
     return std::get<0>(variant);
 }
 
@@ -458,7 +463,7 @@ template <typename V, typename E>
 E constexpr Result<V, E>::error() const
 {
     if (!is_err())
-        throw BadResultException();
+        NBS_THROW(BadResultException());
     return std::get<1>(variant);
 }
 
@@ -529,7 +534,7 @@ template <typename E>
 E constexpr Result<void, E>::error() const
 {
     if (!is_err())
-        throw BadResultException();
+        NBS_THROW(BadResultException());
     return *m_error;
 }
 
@@ -993,13 +998,6 @@ template <typename T>
 NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
     const Graph<T> &graph, const Edges<T> &roots)
 {
-    class CycleException : public std::exception
-    {
-    };
-    class VertexNotFoundException : public std::exception
-    {
-    };
-
     struct Vertex
     {
         const T &name;
@@ -1024,11 +1022,12 @@ NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
     }
 
     ssize_t max_level = 0;
-
-    std::function<void(Vertex &, ssize_t)> do_search =
-        [&](Vertex &vertex, ssize_t level) {
+	
+    std::function<err::Result<void, GraphError>(Vertex &, ssize_t)> do_search =
+        [&](Vertex &vertex, ssize_t level) -> err::Result<void, GraphError> {
             if (vertex.traversing)
-                throw CycleException();
+				return err::Err(CycleDependency);
+                
 
             vertex.traversing = true;
 
@@ -1039,32 +1038,31 @@ NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
             {
                 auto vertex_search = vertices.find(edge);
                 if (vertex_search == vertices.end())
-                    throw VertexNotFoundException();
+					return err::Err(VertexNotFound);
+                    
                 Vertex &v = vertex_search->second;
 
-                do_search(v, level + 1);
+                if(auto res = do_search(v, level + 1); res.is_err())
+				{
+					return res;
+				}
             }
 
             vertex.traversing = false;
 
             if (level > max_level)
                 max_level = level;
+
+			return err::Ok();
         };
 
     Vertex root("", roots);
 
-    try
-    {
-        do_search(root, -1);
-    }
-    catch (CycleException *)
-    {
-        return err::Err(CycleDependency);
-    }
-    catch (VertexNotFoundException *)
-    {
-        return err::Err(VertexNotFound);
-    }
+
+	if(auto res = do_search(root, -1); res.is_err())
+	{
+		return err::Err(res.error());
+	}
 
     std::vector<std::vector<T>> result(max_level + 1);
 
