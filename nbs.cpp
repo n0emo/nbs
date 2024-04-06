@@ -7,32 +7,18 @@ using namespace nbs;
 using namespace log;
 using namespace os;
 
-void build()
-{
-    c::CompileOptions options{
-        .compiler = c::current_compiler(), .flags = {"-Wall"},
-        // .include_paths = {Path(".")},
-    };
-
-    auto obj_proc = options.obj_cmd("hello.o", "hello.cpp").run_async();
-    if (obj_proc.bind<void>([](auto p) { return p.await(); }).is_err())
-        return;
-
-    auto exe_proc = options.exe_cmd("hello", {"hello.o"}).run_async();
-    exe_proc.bind<void>([](auto p) { return p.await(); });
-}
 
 void test_levels()
 {
     std::unordered_map<std::string, std::unordered_set<std::string>> graph;
     graph.insert({"1", {"2", "3", "4"}});
-    graph.insert({"2", {"4"}});
-    graph.insert({"3", {"4"}});
+    graph.insert({"2", {"7"}});
+    graph.insert({"3", {"7"}});
     graph.insert({"4", {}});
     graph.insert({"5", {}});
 
     auto roots = nbs::graph::find_roots(graph);
-    auto result = nbs::graph::topological_levels<std::string>(graph, roots);
+    auto result = nbs::graph::topological_levels<std::string>(graph, {"1"});
     if (result.is_err())
     {
         switch (result.error())
@@ -75,28 +61,12 @@ void test_levels()
 int main(int argc, char **argv)
 {
     self_update(argc, argv, __FILE__);
-    log::info("Testing levels");
-    test_levels();
-    return 0;
 
-    os::path build_path("build");
-    info("nbs" / build_path / "debug");
-    info("Starting build");
-
-    std::string subcommand;
-    if (argc == 1 || (subcommand = argv[1]) == "build")
-    {
-        build();
-    }
-    else if (subcommand == "clean")
-    {
-        Cmd({"rm", "-f", "*.o", "hello"}).run_or_die("Error cleaning directory");
-    }
-    else if (subcommand == "run")
-    {
-        build();
-        Cmd("./hello").run_or_die("Error executing hello");
-    }
-
+	std::vector<std::string> strs {"xd", "lol", "kekwait"};
+	auto res = fp::map([](auto s){ return s.size();}, strs);
+	for(auto n : res)
+	{
+		std::cout << n << std::endl;
+	}
     return 0;
 }

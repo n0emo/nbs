@@ -70,7 +70,6 @@
 // TODO: cover nbs with tests
 // TODO: properly annotate
 // TODO: use string_view
-// TODO: FP module
 
 namespace nbs
 {
@@ -1027,7 +1026,6 @@ NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
         [&](Vertex &vertex, ssize_t level) -> err::Result<void, GraphError> {
             if (vertex.traversing)
 				return err::Err(CycleDependency);
-                
 
             vertex.traversing = true;
 
@@ -1042,7 +1040,8 @@ NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
                     
                 Vertex &v = vertex_search->second;
 
-                if(auto res = do_search(v, level + 1); res.is_err())
+				auto res = do_search(v, level + 1);
+                if(res.is_err())
 				{
 					return res;
 				}
@@ -1058,8 +1057,8 @@ NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
 
     Vertex root("", roots);
 
-
-	if(auto res = do_search(root, -1); res.is_err())
+	auto res = do_search(root, -1);
+	if(res.is_err())
 	{
 		return err::Err(res.error());
 	}
