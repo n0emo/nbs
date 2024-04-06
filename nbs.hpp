@@ -61,6 +61,11 @@
 // TODO: CLI class for easy CLI app building
 // TODO: maybe nbs::unit for unit testing
 // TODO: nbs::config
+// TODO: make compilable with -fno-exceptions
+// TODO: cover nbs with tests
+// TODO: properly annotate
+// TODO: use string_view
+// TODO: FP module
 
 namespace nbs
 {
