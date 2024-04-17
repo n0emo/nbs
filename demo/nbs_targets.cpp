@@ -1,3 +1,4 @@
+#include <exception>
 #define NBS_IMPLEMENTATION
 #include "../nbs.hpp"
 
@@ -13,7 +14,7 @@ enum ConfType
     RELEASE
 };
 
-bool build(int argc, char **argv)
+auto build(int argc, char **argv)
 {
     log::info("Building");
 
@@ -29,7 +30,7 @@ bool build(int argc, char **argv)
     else
     {
         log::error("Unknown configuration '" + conf_str + "'");
-        return 1;
+		std::terminate();
     }
 
     TargetMap targets;
@@ -37,18 +38,18 @@ bool build(int argc, char **argv)
     c::CompileOptions options{.compiler = c::GXX,
                               .standard = "c++20",
                               .flags = {"-Wall", "-Wextra", "-pedantic"},
-                              .include_paths = {Path("include")}};
+                              .include_paths = {path("include")}};
 
-    Path build_path = get_defaults()->build_path;
+    path build_path("build");
     make_directory_if_not_exists(build_path);
     switch (configuration)
     {
     case DEBUG:
-        build_path = build_path + "debug";
+        build_path = build_path / "debug";
         options.flags.emplace_back("-g");
         break;
     case RELEASE:
-        build_path = build_path + "relese";
+        build_path = build_path / "relese";
         options.flags.emplace_back("-O3");
         break;
     }
@@ -57,26 +58,26 @@ bool build(int argc, char **argv)
     pathvec outputs;
     for (const auto &source : sources)
     {
-        Path output = build_path + change_extension(source, "o");
+        path output = build_path / change_extension(source, "o");
         outputs.emplace_back(output);
-        Path input({"src", source});
+        path input = path("src") / source;
         Cmd cmd(options.obj_cmd(output, input));
         Target target(output, cmd, {input});
         targets.insert(target);
     }
 
-    Path exe = build_path + "lab1";
+    path exe = build_path / "lab1";
     Cmd exe_cmd = c::CompileOptions{.compiler = c::GXX}.exe_cmd(exe, outputs);
     Target exe_target(exe, exe_cmd, outputs);
     targets.insert(exe_target);
 
-    return targets.build_if_needs(exe.str());
+    return targets.build_if_needs(exe);
 }
 
-int run()
+auto run()
 {
-    int result = Cmd("./build/debug/lab1").run();
-    if (result != 0)
+    auto result = Cmd("./build/debug/lab1").run();
+    if (result.is_err())
         log::error("Error running file");
     return result;
 }
@@ -85,20 +86,18 @@ int main(int argc, char **argv)
 {
     self_update(argc, argv, __FILE__);
 
-    get_defaults()->build_path = "build";
-
     string subcommand = argc > 1 ? argv[1] : "";
 
     if (subcommand == "" || subcommand == "build")
     {
-        return build(argc, argv) != true;
+        return build(argc, argv).is_err();
     }
     else if (subcommand == "run")
     {
-        int result = build(argc, argv);
-        if (!result)
+        auto result = build(argc, argv);
+        if (result.is_err())
             return 1;
-        return run() != true;
+        return run().is_err();
     }
     else
     {
