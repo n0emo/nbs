@@ -30,18 +30,15 @@
 #define NBS_HPP
 
 #include <cassert>
+#include <ctime>
 
 #include <algorithm>
-#include <exception>
-#include <filesystem>
 #include <functional>
 #include <iostream>
-#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <variant>
 #include <vector>
 
 #ifdef _WIN32
@@ -78,98 +75,17 @@ typedef std::vector<std::string> strvec;
 
 NBSAPI void self_update(int argc, char **argv, const std::string &source);
 
-namespace err
-{
-template <typename T>
-struct Ok
-{
-    T value;
-
-    Ok() = default;
-    ~Ok() = default;
-    Ok(const Ok &) = delete;
-    Ok(Ok &&) = delete;
-
-    Ok(const T &value);
-};
-
-template <>
-struct Ok<void>
-{
-    Ok() = default;
-    ~Ok() = default;
-    Ok(const Ok &) = delete;
-    Ok(Ok &&) = delete;
-};
-
-Ok() -> Ok<void>;
-
-template <typename T>
-struct Err
-{
-    T value;
-
-    Err() = default;
-    ~Err() = default;
-    Err(const Err &) = delete;
-    Err(Err &&) = delete;
-
-    Err(const T &value);
-};
-
-template <typename V, typename E>
-class Result
-{
-    std::variant<V, E> variant;
-
-  public:
-    constexpr Result();
-    constexpr Result(const Result &other);
-    constexpr Result(const std::variant<V, E> &variant);
-    constexpr Result(const Ok<V> &ok);
-    constexpr Result(const Err<E> &err);
-    constexpr Result &operator=(const Result &other);
-
-    constexpr bool is_ok() const;
-    constexpr bool is_err() const;
-    constexpr V value() const;
-    constexpr V value_or(const V &default_value) const;
-    constexpr E error() const;
-    constexpr V &operator*();
-    constexpr V *operator->();
-
-    template <typename NewV>
-    Result<NewV, E> bind(std::function<Result<NewV, E>(V)> func);
-};
-
-template <typename E>
-class Result<void, E>
-{
-    std::optional<E> m_error;
-
-  public:
-    constexpr Result() = default; // TODO: consider delete
-    constexpr Result(const Result &other);
-    constexpr Result(const Ok<void> &);
-    constexpr Result(const Err<E> &err);
-    constexpr Result &operator=(const Result &other);
-
-    constexpr bool is_ok() const;
-    constexpr bool is_err() const;
-    constexpr E error() const;
-};
-
-class BadResultException : public std::exception
-{
-  public:
-    BadResultException() = default;
-    const char *what() const noexcept;
-};
-} // namespace err
-
 namespace os
 {
-using path = std::filesystem::path;
+struct Path {
+    std::string buf;
+
+    Path() = default;
+    Path(const std::string &str);
+    Path(const char *str);
+};
+
+using path = Path;
 
 enum ProcessError
 {
@@ -195,7 +111,7 @@ struct Process
     int pid;
     Process(int pid);
 #endif
-    err::Result<void, ProcessError> await() const;
+    void await() const;
 };
 
 struct Cmd
@@ -211,13 +127,13 @@ struct Cmd
     void append_many_prefixed(const std::string &prefix, const strvec &items);
 
     std::string to_string() const;
-    err::Result<void, ProcessError> run() const;
-    err::Result<Process, ProcessError> run_async() const;
+    void run() const;
+    Process run_async() const;
     void run_or_die(const std::string &message) const;
     std::unique_ptr<char *[]> to_c_argv() const;
 };
 
-NBSAPI err::Result<void, ProcessError> await_processes(const std::vector<Process> &processes);
+NBSAPI void await_processes(const std::vector<Process> &processes);
 
 #ifdef _WIN32
 std::string windows_error_code_to_str(DWORD error);
@@ -231,6 +147,8 @@ NBSAPI pathvec strs_to_paths(const strvec &paths);
 NBSAPI long compare_last_mod_time(const path &path1, const path &path2);
 NBSAPI bool make_directory_if_not_exists(const path &path);
 NBSAPI bool exists(const path &path);
+NBSAPI void rename(const os::path &from, const path &to);
+NBSAPI long last_write_time(const os::path &path);
 } // namespace os
 
 namespace str
@@ -277,7 +195,7 @@ template <typename T>
 NBSAPI std::unordered_set<T> find_roots(const Graph<T> &graph);
 
 template <typename T>
-NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
+NBSAPI std::vector<std::vector<T>> topological_levels(
     const Graph<T> &graph, const Edges<T> &roots);
 } // namespace graph
 
@@ -299,7 +217,7 @@ struct Target
     Target(const os::path &output, const os::Cmd &cmd, const os::pathvec &dependencies = {});
     Target(const os::path &output, const std::vector<os::Cmd> &cmds, const os::pathvec &dependencies = {});
 
-    err::Result<void, os::ProcessError> build() const;
+    void build() const;
 };
 
 struct TargetMap
@@ -310,9 +228,9 @@ struct TargetMap
 
     void insert(Target &target);
     bool remove(const std::string &target);
-    err::Result<void, BuildError> build(const std::string &output) const;
-    err::Result<void, BuildError> build_if_needs(const std::string &output) const;
-    bool needs_rebuild(const std::string &output) const;
+    void build(const std::string &output) const;
+    void build_if_needs(const std::string &output) const;
+    bool needs_rebuild(const os::path &output) const;
 };
 } // namespace target
 
@@ -375,189 +293,21 @@ NBSAPI Compiler current_compiler();
 
 namespace nbs
 {
-namespace err
-{
-template <typename T>
-Ok<T>::Ok(const T &value)
-    : value(value)
-{
-}
-
-template <typename T>
-Err<T>::Err(const T &value)
-    : value(value)
-{
-}
-
-template <typename V, typename E>
-constexpr Result<V, E>::Result()
-    : variant()
-{
-}
-
-template <typename V, typename E>
-constexpr Result<V, E>::Result(const Result &other)
-    : variant(other.variant)
-{
-}
-
-template <typename V, typename E>
-constexpr Result<V, E>::Result(const std::variant<V, E> &variant)
-    : variant(variant)
-{
-}
-
-template <typename V, typename E>
-constexpr Result<V, E>::Result(const Ok<V> &ok)
-    : variant{std::in_place_index<0>, ok.value}
-{
-}
-
-template <typename V, typename E>
-constexpr Result<V, E>::Result(const Err<E> &err)
-    : variant{std::in_place_index<1>, err.value}
-{
-}
-
-template <typename V, typename E>
-Result<V, E> constexpr &Result<V, E>::operator=(const Result<V, E> &other)
-{
-    variant = other.variant;
-    return *this;
-}
-
-template <typename V, typename E>
-bool constexpr Result<V, E>::is_ok() const
-{
-    return variant.index() == 0;
-}
-
-template <typename V, typename E>
-bool constexpr Result<V, E>::is_err() const
-{
-    return variant.index() == 1;
-}
-
-template <typename V, typename E>
-V constexpr Result<V, E>::value() const
-{
-    if (!is_ok())
-        NBS_THROW(BadResultException());
-    return std::get<0>(variant);
-}
-
-template <typename V, typename E>
-V constexpr Result<V, E>::value_or(const V &default_value) const
-{
-    if (auto *v = std::get_if<0>(variant))
-    {
-        return *v;
-    }
-    else
-    {
-        return default_value;
-    }
-}
-
-template <typename V, typename E>
-E constexpr Result<V, E>::error() const
-{
-    if (!is_err())
-        NBS_THROW(BadResultException());
-    return std::get<1>(variant);
-}
-
-template <typename V, typename E>
-V constexpr &Result<V, E>::operator*()
-{
-    return *std::get_if<0>(&variant);
-}
-
-template <typename V, typename E>
-V constexpr *Result<V, E>::operator->()
-{
-    return std::get_if<0>(&variant);
-}
-
-template <typename V, typename E>
-template <typename NewV>
-Result<NewV, E> Result<V, E>::bind(std::function<Result<NewV, E>(V)> func)
-{
-    if (auto value = std::get_if<0>(&variant))
-    {
-        return func(*value);
-    }
-    else
-    {
-        return err::Err(std::get<1>(variant));
-    }
-}
-
-template <typename E>
-constexpr Result<void, E>::Result(const Result &other)
-    : m_error(other.m_error)
-{
-}
-
-template <typename E>
-constexpr Result<void, E>::Result(const Ok<void> &)
-    : m_error(std::nullopt)
-{
-}
-
-template <typename E>
-constexpr Result<void, E>::Result(const Err<E> &err)
-    : m_error(err.value)
-{
-}
-
-template <typename E>
-Result<void, E> constexpr &Result<void, E>::operator=(const Result &other)
-{
-    m_error = other.m_error;
-    return *this;
-}
-
-template <typename E>
-bool constexpr Result<void, E>::is_ok() const
-{
-    return !m_error.has_value();
-}
-
-template <typename E>
-bool constexpr Result<void, E>::is_err() const
-{
-    return m_error.has_value();
-}
-
-template <typename E>
-E constexpr Result<void, E>::error() const
-{
-    if (!is_err())
-        NBS_THROW(BadResultException());
-    return *m_error;
-}
-
-const char *BadResultException::what() const noexcept
-{
-    return "Attempt to access bad result";
-}
-} // namespace err
 NBSAPI void self_update(int argc, char **argv, const std::string &source)
 {
     assert(argc > 0);
     std::string exe(argv[0]);
 
-    if (os::compare_last_mod_time(source, exe) < 0)
-        return;
+    if (os::compare_last_mod_time(source, exe) < 0) return;
 
     log::info("Updating");
-    std::filesystem::rename(exe, exe + ".old");
+    log::info("Renaming " + exe + " to " + exe + ".old");
+    os::rename(exe, exe + ".old");
 
     os::Cmd compile_cmd;
     compile_cmd.append_many({c::comp_str(c::current_compiler()), source});
 #ifdef _MSC_VER
-    cmd.append_many({"-std:c++20", "-Fe:" + exe, "-FC", "-EHsc", "-nologo"});
+    compile_cmd.append_many({"-Fe:" + exe, "-FC", "-EHsc", "-nologo"});
 #else
     compile_cmd.append_many({"-o", exe});
 #endif
@@ -575,6 +325,9 @@ NBSAPI void self_update(int argc, char **argv, const std::string &source)
 
 namespace os
 {
+Path::Path(const std::string &str) : buf(str) {}
+Path::Path(const char *str) : buf(str) {}
+
 #ifdef _WIN32
 Process::Process(HANDLE handle)
     : handle(handle)
@@ -587,7 +340,7 @@ Process::Process(int pid)
 }
 #endif
 
-err::Result<void, ProcessError> Process::await() const
+void Process::await() const
 {
 #ifdef _WIN32
     DWORD result = WaitForSingleObject(handle, INFINITE);
@@ -595,58 +348,50 @@ err::Result<void, ProcessError> Process::await() const
     if (result == WAIT_FAILED)
     {
         log::error(os::windows_last_error_str());
-        return err::Err(PROCESS_WAIT_ERROR);
+        // TODO: Error
+        throw PROCESS_WAIT_ERROR;
     }
 
     DWORD exit_status;
     if (!GetExitCodeProcess(handle, &exit_status))
-        return err::Err(PROCESS_GET_EXIT_CODE_ERROR);
+        // TODO: Error
+        throw PROCESS_GET_EXIT_CODE_ERROR;
 
     if (exit_status != 0)
-        return err::Err(PROCESS_EXIT_STATUS_ERROR);
+        // TODO: Error
+        throw PROCESS_EXIT_STATUS_ERROR;
 
     CloseHandle(handle);
-
-    return err::Ok();
 #else
     while (true)
     {
         int status = 0;
         if (waitpid(pid, &status, 0) < 0)
         {
-            return err::Err(PROCESS_WAIT_ERROR);
+            // TODO: Error
+            throw PROCESS_WAIT_ERROR;
         }
 
         if (WIFEXITED(status))
         {
             int exit_status = WEXITSTATUS(status);
-            if (exit_status == 0)
-                return err::Ok();
-            else
-                return err::Err(PROCESS_EXIT_STATUS_ERROR);
+            if (exit_status == 0) return err::Ok();
+            // TODO: Error
+            else throw PROCESS_EXIT_STATUS_ERROR;
         }
 
-        if (WIFSIGNALED(status))
-        {
-            return err::Err(PROCESS_WAIT_ERROR);
-        }
+        // TODO: Error
+        if (WIFSIGNALED(status)) throw PROCESS_WAIT_ERROR;
     }
 #endif
 }
 
-NBSAPI err::Result<void, ProcessError> await_processes(const std::vector<Process> &processes)
+NBSAPI void await_processes(const std::vector<Process> &processes)
 {
-    err::Result<void, ProcessError> result = err::Ok();
-
     for (const auto &proc : processes)
     {
-        result = proc.await();
-        if (result.is_err())
-        {
-            return result;
-        }
+        proc.await();
     }
-    return result;
 }
 
 Cmd::Cmd()
@@ -700,19 +445,18 @@ std::string Cmd::to_string() const
     return ss.str();
 }
 
-err::Result<void, ProcessError> Cmd::run() const
+void Cmd::run() const
 {
-    return run_async().bind<void>(
-        [](auto p) { return p.await(); });
+    run_async().await();
 }
 
-err::Result<Process, ProcessError> Cmd::run_async() const
+Process Cmd::run_async() const
 {
-    if (items.empty())
-        return err::Err(PROCESS_EMPTY_CMD_ERROR);
+    // TODO: Error
+    if (items.empty()) throw PROCESS_EMPTY_CMD_ERROR;
 
     std::string args_str = to_string();
-    std::cout << args_str << '\n';
+    log::info("CMD: " + args_str);
 
 #ifdef _WIN32
     char *args = (char *)args_str.c_str(); // TODO: Proper Cmd.to_string
@@ -721,22 +465,16 @@ err::Result<Process, ProcessError> Cmd::run_async() const
     startupinfo.cb = sizeof(startupinfo);
 
     startupinfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    if (startupinfo.hStdInput == INVALID_HANDLE_VALUE)
-    {
-        return err::Err(PROCESS_GET_HANDLE_ERROR);
-    }
+    // TODO: Error
+    if (startupinfo.hStdInput == INVALID_HANDLE_VALUE) throw PROCESS_GET_HANDLE_ERROR;
 
     startupinfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (startupinfo.hStdOutput == INVALID_HANDLE_VALUE)
-    {
-        return err::Err(PROCESS_GET_HANDLE_ERROR);
-    }
+    // TODO: Error
+    if (startupinfo.hStdOutput == INVALID_HANDLE_VALUE) throw PROCESS_GET_HANDLE_ERROR;
 
     startupinfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    if (startupinfo.hStdError == INVALID_HANDLE_VALUE)
-    {
-        return err::Err(PROCESS_GET_HANDLE_ERROR);
-    }
+    // TODO: Error
+    if (startupinfo.hStdError == INVALID_HANDLE_VALUE) throw PROCESS_GET_HANDLE_ERROR;
 
     startupinfo.dwFlags |= STARTF_USESTDHANDLES;
 
@@ -744,35 +482,30 @@ err::Result<Process, ProcessError> Cmd::run_async() const
     ZeroMemory(&process_info, sizeof(process_info));
 
     BOOL success = CreateProcessA(NULL, args, NULL, NULL, TRUE, 0, NULL, NULL, &startupinfo, &process_info);
-    if (!success)
-    {
-        return err::Err(PROCESS_CREATE_ERROR);
-    }
+    // TODO: Error
+    if (!success) throw PROCESS_CREATE_ERROR;
 
     CloseHandle(process_info.hThread);
 
     return process_info.hProcess;
 #else
     int p = fork();
-    if (p < 0)
-    {
-        return err::Err(PROCESS_CREATE_ERROR);
-    }
+    if (p < 0) throw PROCESS_CREATE_ERROR;
     else if (p == 0)
     {
         auto args = to_c_argv();
         execvp(args[0], args.get());
-        return err::Err(PROCESS_EXEC_ERROR);
+        throw PROCESS_EXEC_ERROR;
     }
-
-    return err::Ok(Process(p));
 #endif
 }
 
 void Cmd::run_or_die(const std::string &message) const
 {
-    if (run().is_err())
-    {
+    try {
+        run();
+    // TODO: Error
+    } catch (int) {
         nbs::log::error(message);
         exit(1);
     }
@@ -815,7 +548,7 @@ NBSAPI strvec paths_to_strs(const pathvec &paths)
     strvec result;
     for (const path &path : paths)
     {
-        result.push_back(path);
+        result.push_back(path.buf);
     }
     return result;
 }
@@ -830,20 +563,60 @@ NBSAPI pathvec strs_to_paths(const strvec &paths)
 
 NBSAPI long compare_last_mod_time(const path &path1, const path &path2)
 {
-    auto time1 = std::filesystem::last_write_time(path1);
-    auto time2 = std::filesystem::last_write_time(path2);
-    auto diff = time1 - time2;
-    return diff.count();
+    long time1 = os::last_write_time(path1);
+    long time2 = os::last_write_time(path2);
+    return time1 - time2;
 }
 
 NBSAPI bool make_directory_if_not_exists(const path &path)
 {
-    return std::filesystem::create_directory(path);
+#if _WIN32
+    // TODO: Error handling
+    CreateDirectory(path.buf.c_str(), NULL);
+    return true;
+#else
+    #error "rename for POSIX is not implemented"
+#endif
 }
 
 NBSAPI bool exists(const path &path)
 {
-    return std::filesystem::exists(path);
+    return GetFileAttributesA(path.buf.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+NBSAPI void rename(const os::path &from, const path &to) {
+#if _WIN32
+    MoveFileEx(from.buf.c_str(), to.buf.c_str(), MOVEFILE_REPLACE_EXISTING);
+#else
+    #error "rename for POSIX is not implemented"
+#endif
+}
+
+NBSAPI long last_write_time(const os::path &path) {
+#if _WIN32
+    const int64_t WINDOWS_TICK = 10000000;
+    const int64_t SEC_TO_UNIX_EPOCH = 11644473600LL;
+
+    HANDLE hfile = CreateFile(
+        path.buf.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ|FILE_SHARE_WRITE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    FILETIME last_write;
+    // TODO: Error handling
+    GetFileTime(hfile, NULL, NULL, &last_write);
+    int64_t val = *(int64_t *) &last_write;
+    val = val / WINDOWS_TICK - SEC_TO_UNIX_EPOCH;
+    CloseHandle(hfile);
+    return val;
+#else
+    #error "last_write_time for POSIX is not implemented"
+#endif
+    return false;
 }
 } // namespace os
 
@@ -995,22 +768,23 @@ NBSAPI std::unordered_set<T> find_roots(const Graph<T> &graph)
 }
 
 template <typename T>
-NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
-    const Graph<T> &graph, const Edges<T> &roots)
-{
+NBSAPI std::vector<std::vector<T>> topological_levels(
+    const Graph<T> &graph, const Edges<T> &roots
+) {
     struct Vertex
     {
         const T &name;
         const std::unordered_set<T> &edges;
-        std::optional<ssize_t> level;
+        ptrdiff_t level;
+        bool has_level;
         bool traversing;
 
         Vertex(const T &name, const Edges<T> &edges)
-            : name(name), edges(edges), level(std::nullopt), traversing(false)
+            : name(name), edges(edges), level(0), has_level(false), traversing(false)
         {
         }
-        Vertex(const T &name, const Edges<T> &edges, ssize_t level)
-            : name(name), edges(edges), level(level), traversing(false)
+        Vertex(const T &name, const Edges<T> &edges, ptrdiff_t level, bool has_level)
+            : name(name), edges(edges), level(level), has_level(false), traversing(false)
         {
         }
     };
@@ -1021,63 +795,50 @@ NBSAPI err::Result<std::vector<std::vector<T>>, GraphError> topological_levels(
         vertices.insert({pair.first, Vertex(pair.first, pair.second)});
     }
 
-    ssize_t max_level = 0;
+    ptrdiff_t max_level = 0;
 	
-    std::function<err::Result<void, GraphError>(Vertex &, ssize_t)> do_search =
-        [&](Vertex &vertex, ssize_t level) -> err::Result<void, GraphError> {
-            if (vertex.traversing)
-				return err::Err(CycleDependency);
+    std::function<void(Vertex &, ptrdiff_t)> do_search =
+        [&](Vertex &vertex, ptrdiff_t level) -> void {
+            if (vertex.traversing) throw CycleDependency;
 
             vertex.traversing = true;
 
-            if (vertex.level.value_or(-1) <= level)
+            ptrdiff_t v_level = vertex.has_level ? vertex.level : -1;
+            if (v_level <= level) {
                 vertex.level = level;
+                vertex.has_level = true;
+            }
 
             for (const T &edge : vertex.edges)
             {
                 auto vertex_search = vertices.find(edge);
-                if (vertex_search == vertices.end())
-					return err::Err(VertexNotFound);
-                    
+                if (vertex_search == vertices.end()) throw VertexNotFound;
                 Vertex &v = vertex_search->second;
 
-				auto res = do_search(v, level + 1);
-                if(res.is_err())
-				{
-					return res;
-				}
+				do_search(v, level + 1);
             }
 
             vertex.traversing = false;
 
             if (level > max_level)
                 max_level = level;
-
-			return err::Ok();
         };
 
     Vertex root("", roots);
 
-	auto res = do_search(root, -1);
-	if(res.is_err())
-	{
-		return err::Err(res.error());
-	}
+	do_search(root, -1);
 
     std::vector<std::vector<T>> result(max_level + 1);
 
     for (const auto &v : vertices)
     {
-        if (!v.second.level.has_value())
-            continue;
+        if (!v.second.has_level) continue;
+        if (v.second.level < 0) continue;
 
-        if (*v.second.level < 0)
-            continue;
-
-        result[*v.second.level].emplace_back(v.first);
+        result[v.second.level].emplace_back(v.first);
     }
 
-    return err::Ok(result);
+    return result;
 }
 } // namespace graph
 
@@ -1092,21 +853,17 @@ Target::Target(const os::path &output, const std::vector<os::Cmd> &cmds, const o
 {
 }
 
-err::Result<void, os::ProcessError> Target::build() const
+void Target::build() const
 {
-    err::Result<void, os::ProcessError> result;
     for (const auto &cmd : cmds)
     {
-        result = cmd.run();
-        if (result.is_err())
-            return result;
+        cmd.run();
     }
-    return result;
 }
 
 void TargetMap::insert(Target &target)
 {
-    targets.insert({target.output, target});
+    targets.insert({target.output.buf, target});
 }
 
 bool TargetMap::remove(const std::string &target_output)
@@ -1114,11 +871,10 @@ bool TargetMap::remove(const std::string &target_output)
     return targets.erase(target_output) > 0;
 }
 
-err::Result<void, BuildError> TargetMap::build(const std::string &output) const
+void TargetMap::build(const std::string &output) const
 {
     auto target_it = targets.find(output);
-    if (target_it == targets.end())
-        return err::Err(BUILD_NO_RULE_FOR_TARGET_ERROR);
+    if (target_it == targets.end()) throw BUILD_NO_RULE_FOR_TARGET_ERROR;
     auto target = target_it->second;
 
     for (const auto &dep : target.dependencies)
@@ -1126,22 +882,15 @@ err::Result<void, BuildError> TargetMap::build(const std::string &output) const
         if (os::exists(dep))
             continue;
 
-        auto result = build(dep);
-        if (result.is_err())
-            return result;
+        build(dep.buf);
     }
 
-    auto build_result = target.build();
-    if (build_result.error())
-        return err::Err(BUILD_CMD_ERROR);
-
-    return err::Ok();
+    target.build();
 }
 
-err::Result<void, BuildError> TargetMap::build_if_needs(const std::string &output) const
+void TargetMap::build_if_needs(const std::string &output) const
 {
-    if (!needs_rebuild(output))
-        return err::Ok();
+    if (!needs_rebuild(output)) return;
 
     auto target = targets.find(output)->second; // TODO: error handling
     graph::Graph<std::string> graph;
@@ -1150,70 +899,70 @@ err::Result<void, BuildError> TargetMap::build_if_needs(const std::string &outpu
         graph::Edges<std::string> edges;
         for (const auto &e : p.second.dependencies)
         {
-            edges.insert(e);
-            graph[e];
+            edges.insert(e.buf);
+            graph[e.buf];
         }
         graph[p.first] = edges;
     }
-    auto levels_result = graph::topological_levels(graph, {target.output});
 
-    if (levels_result.is_err())
-    {
-        switch (levels_result.error())
+    std::vector<std::vector<std::string>> levels;
+    try {
+        levels = graph::topological_levels<std::string>(graph, {target.output.buf});
+    } catch (graph::GraphError e) {
+        switch (e)
         {
         case graph::CycleDependency:
-            return err::Err(BUILD_CYCLE_DEPENDENCY_ERROR);
+            throw BUILD_CYCLE_DEPENDENCY_ERROR;
         case graph::VertexNotFound:
-            return err::Err(BUILD_NO_RULE_FOR_TARGET_ERROR);
+            throw BUILD_NO_RULE_FOR_TARGET_ERROR;
         default:
             assert(0 && "Unreachable");
         }
     }
 
-    auto levels = *levels_result;
-
-    for (ssize_t i = levels_result->size() - 1; i >= 0; i--)
+    for (ptrdiff_t i = levels.size() - 1; i >= 0; i--)
     {
         std::vector<os::Process> processes;
         for (const auto &t_name : levels[i])
         {
-            if (auto t_search = targets.find(t_name); t_search != targets.end())
+            auto t_search = targets.find(t_name); 
+            if (t_search != targets.end())
             {
                 if (!needs_rebuild(t_name))
                     continue;
                 auto t = t_search->second;
-                auto p_result = t.cmds[0].run_async();
-                if (p_result.is_err())
-                    return err::Err(BUILD_CMD_ERROR);
-                processes.emplace_back(p_result.value()); // TODO: multiple commands
+                try {
+                    os::Process p = t.cmds[0].run_async();
+                    processes.emplace_back(p); // TODO: multiple commands
+                } catch (os::ProcessError e) {
+                    throw BUILD_CMD_ERROR;
+                }
             }
-            else if (!os::exists(t_name))
-            {
-                return err::Err(BUILD_NO_RULE_FOR_TARGET_ERROR);
-            }
+            else if (!os::exists(t_name)) throw BUILD_NO_RULE_FOR_TARGET_ERROR;
         }
-        auto await_result = await_processes(processes);
-        if (await_result.is_err())
-            return err::Err(BUILD_CMD_ERROR);
+
+        try {
+            await_processes(processes);
+        } catch (os::ProcessError e) {
+            throw BUILD_CMD_ERROR;
+        }
     }
-    return err::Ok();
 }
 
-bool TargetMap::needs_rebuild(const std::string &output) const
+bool TargetMap::needs_rebuild(const os::path &output) const
 {
-    if (!std::filesystem::exists(output))
-        return true;
+    if (!os::exists(output)) return true;
 
-    auto target_it = targets.find(output);
+    auto target_it = targets.find(output.buf);
     if (target_it == targets.end())
         TODO("needs_rebuild error handling");
     auto target = target_it->second;
 
     for (const auto &dep : target.dependencies)
     {
-        if (((targets.find(dep) != targets.end()) && needs_rebuild(dep)) ||
-            (((targets.find(dep) != targets.end()) && !std::filesystem::exists(dep)) ||
-             (std::filesystem::exists(dep) && (os::compare_last_mod_time(output, dep) < 0))))
+        if (((targets.find(dep.buf) != targets.end()) && needs_rebuild(dep)) ||
+            (((targets.find(dep.buf) != targets.end()) && !os::exists(dep)) ||
+             (os::exists(dep) && (os::compare_last_mod_time(output, dep) < 0))))
         {
             return true;
         }
@@ -1302,12 +1051,12 @@ os::Cmd CompileOptions::exe_cmd(const os::path &output, const os::pathvec &sourc
     strvec additional_flags;
     if (compiler == MSVC)
     {
-        additional_flags.emplace_back("-Fe:" + output.string());
+        additional_flags.emplace_back("-Fe:" + output.buf);
     }
     else
     {
         additional_flags.emplace_back("-o");
-        additional_flags.emplace_back(output);
+        additional_flags.emplace_back(output.buf);
     }
 
     return this->cmd(sources, additional_flags);
@@ -1319,12 +1068,12 @@ os::Cmd CompileOptions::obj_cmd(const os::path &output, const os::path &source) 
     additional_flags.emplace_back("-c");
     if (compiler == MSVC)
     {
-        additional_flags.emplace_back("-Fo:" + output.string());
+        additional_flags.emplace_back("-Fo:" + output.buf);
     }
     else
     {
         additional_flags.emplace_back("-o");
-        additional_flags.emplace_back(output);
+        additional_flags.emplace_back(output.buf);
     }
     return this->cmd({source}, additional_flags);
 }
