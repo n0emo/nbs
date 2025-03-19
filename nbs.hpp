@@ -353,13 +353,11 @@ void Process::await() const
     }
 
     DWORD exit_status;
-    if (!GetExitCodeProcess(handle, &exit_status))
-        // TODO: Error
-        throw PROCESS_GET_EXIT_CODE_ERROR;
+    // TODO: Error
+    if (!GetExitCodeProcess(handle, &exit_status)) throw PROCESS_GET_EXIT_CODE_ERROR;
 
-    if (exit_status != 0)
-        // TODO: Error
-        throw PROCESS_EXIT_STATUS_ERROR;
+    // TODO: Error
+    if (exit_status != 0) throw PROCESS_EXIT_STATUS_ERROR;
 
     CloseHandle(handle);
 #else
