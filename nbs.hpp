@@ -83,6 +83,13 @@ struct Path {
     Path() = default;
     Path(const std::string &str);
     Path(const char *str);
+
+    Path &operator /=(const Path &other);
+    Path operator /(const Path &other) const;
+    Path &operator /=(const std::string &other);
+    Path operator /(const std::string &other) const;
+    Path &operator /=(const char *other);
+    Path operator /(const char *other) const;
 };
 
 using path = Path;
@@ -120,7 +127,7 @@ struct Cmd
 
     Cmd();
     Cmd(const std::string &cmd);
-    Cmd(const strvec &cmd);
+    Cmd(const std::initializer_list<std::string> &cmd);
 
     void append(const std::string &item);
     void append_many(const strvec &items);
@@ -283,6 +290,30 @@ NBSAPI Compiler current_compiler();
 } // namespace c
 }; // namespace nbs
 
+namespace vcpkg
+{
+struct TargetTriplet {
+    std::string triplet;
+    bool is_static;
+
+    std::string to_string() const;
+};
+
+struct Vcpkg {
+    TargetTriplet triplet;
+    nbs::os::path root;
+
+    Vcpkg();
+
+    Vcpkg &with_triplet(const std::string &triplet);
+    Vcpkg &with_root(const nbs::os::path &path);
+    nbs::os::pathvec include_paths() const;
+    nbs::os::pathvec library_paths() const;
+
+    void install() const;
+};
+}; // namespace vcpkg
+
 // -------------------------------
 //
 //        Implementation
@@ -306,7 +337,7 @@ NBSAPI void self_update(int argc, char **argv, const std::string &source)
 
     os::Cmd compile_cmd;
     compile_cmd.append_many({c::comp_str(c::current_compiler()), source});
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
     compile_cmd.append_many({"-Fe:" + exe, "-FC", "-EHsc", "-nologo"});
 #else
     compile_cmd.append_many({"-o", exe});
@@ -327,6 +358,42 @@ namespace os
 {
 Path::Path(const std::string &str) : buf(str) {}
 Path::Path(const char *str) : buf(str) {}
+
+// TODO: Windows...
+Path &Path::operator /=(const Path &other) {
+    if (this->buf.back() != '/') {
+        this->buf.push_back('/');
+    }
+
+    auto iter = other.buf.begin();
+    if (*iter == '/') {
+        iter++;
+    }
+
+    this->buf.append(iter, other.buf.end());
+
+    return *this;
+}
+
+Path Path::operator /(const Path &other) const {
+    return Path(*this) /= other;
+}
+
+Path &Path::operator /=(const std::string &other) {
+    return *this /= Path(other);
+}
+
+Path Path::operator /(const std::string &other) const {
+    return *this / Path(other);
+}
+
+Path &Path::operator /=(const char *other) {
+    return *this /= Path(other);
+}
+
+Path Path::operator /(const char *other) const {
+    return *this / Path(other);
+}
 
 #ifdef _WIN32
 Process::Process(HANDLE handle)
@@ -401,7 +468,7 @@ Cmd::Cmd(const std::string &cmd)
     append(cmd);
 }
 
-Cmd::Cmd(const strvec &cmd)
+Cmd::Cmd(const std::initializer_list<std::string> &cmd)
 {
     append_many(cmd);
 }
@@ -1077,5 +1144,41 @@ os::Cmd CompileOptions::obj_cmd(const os::path &output, const os::path &source) 
 }
 } // namespace c
 } // namespace nbs
+
+namespace vcpkg
+{
+std::string TargetTriplet::to_string() const {
+    return triplet;
+}
+
+Vcpkg::Vcpkg() : root("vcpkg_installed") {}
+
+Vcpkg &Vcpkg::with_triplet(const std::string &triplet) {
+    bool is_static = triplet.find("-static") != std::string::npos;
+    this->triplet = TargetTriplet { triplet, is_static };
+    return *this;
+}
+
+Vcpkg &Vcpkg::with_root(const nbs::os::path &path) {
+    this->root = path;
+    return *this;
+}
+
+nbs::os::pathvec Vcpkg::include_paths() const {
+    return { root / triplet.to_string() / "include" };
+}
+
+nbs::os::pathvec Vcpkg::library_paths() const {
+    return { root / triplet.to_string() / "lib" };
+}
+
+void Vcpkg::install() const {
+    nbs::os::Cmd({
+        "vcpkg", "install",
+        "--triplet=" + triplet.to_string(),
+        "--vcpkg-root=" + root.buf,
+    }).run();
+}
+}
 #endif // NBS_IMPLEMENTATION
 #endif // NBS_HPP

@@ -1,0 +1,6 @@
+vcpkg_installed/
+app
+nbs
+nbs.old
+*.obj
+*.o
