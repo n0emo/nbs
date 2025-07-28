@@ -245,19 +245,20 @@ struct TargetMap
 
 namespace c
 {
-enum Compiler
+enum class Compiler
 {
     CC,
     CXX,
     GCC,
     GXX,
     CLANG,
+    CLANGXX,
     MSVC,
 };
 
 struct CDefaults
 {
-    Compiler compiler = CXX;
+    Compiler compiler = Compiler::CXX;
     std::string standard;
     strvec flags;
     os::pathvec include_paths;
@@ -672,7 +673,7 @@ NBSAPI void rename(const os::path &from, const path &to) {
     MoveFileEx(from.buf.c_str(), to.buf.c_str(), MOVEFILE_REPLACE_EXISTING);
 #else
     // TODO: Error handling
-    rename(from.buf.c_str(), to.buf.c_str());
+    int ret = std::rename(from.buf.c_str(), to.buf.c_str());
 #endif
 }
 
@@ -700,7 +701,7 @@ NBSAPI long last_write_time(const os::path &path) {
 #else
     struct stat st = {0};
     stat(path.buf.c_str(), &st);
-    return st.st_atimespec.tv_sec;
+    return st.st_ctimespec.tv_sec;
 #endif
 }
 } // namespace os
@@ -1063,17 +1064,19 @@ NBSAPI std::string comp_str(Compiler comp)
 {
     switch (comp)
     {
-    case CC:
+    case Compiler::CC:
         return "cc";
-    case CXX:
+    case Compiler::CXX:
         return "c++";
-    case GCC:
+    case Compiler::GCC:
         return "gcc";
-    case GXX:
+    case Compiler::GXX:
         return "g++";
-    case CLANG:
+    case Compiler::CLANG:
         return "clang";
-    case MSVC:
+    case Compiler::CLANGXX:
+        return "clang++";
+    case Compiler::MSVC:
         return "cl.exe";
     default:
         return "UNKNOWN COMPILER";
@@ -1084,7 +1087,7 @@ NBSAPI Compiler current_compiler()
 {
 //  Clang C++ emulates GCC, so it has to appear early.
 #if defined __clang__ && !defined(__ibmxl__) && !defined(__CODEGEARC__)
-    return CLANG;
+    return Compiler::CLANGXX;
 
 // MINGW32
 #elif defined(__MINGW32__)
@@ -1133,7 +1136,7 @@ os::Cmd CompileOptions::cmd(const os::pathvec &sources, const strvec &additional
 os::Cmd CompileOptions::exe_cmd(const os::path &output, const os::pathvec &sources) const
 {
     strvec additional_flags;
-    if (compiler == MSVC)
+    if (compiler == Compiler::MSVC)
     {
         additional_flags.emplace_back("-Fe:" + output.buf);
     }
@@ -1150,7 +1153,7 @@ os::Cmd CompileOptions::obj_cmd(const os::path &output, const os::path &source) 
 {
     strvec additional_flags;
     additional_flags.emplace_back("-c");
-    if (compiler == MSVC)
+    if (compiler == Compiler::MSVC)
     {
         additional_flags.emplace_back("-Fo:" + output.buf);
     }
@@ -1173,7 +1176,7 @@ void make_available(const os::path &path, const std::string &url, WgetBackend ba
         } break;
 
         case WgetBackend::Curl: {
-            auto cmd = os::Cmd({"curl", url, "-o", path.buf});
+            auto cmd = os::Cmd({"curl", "-L", "-o", path.buf, url});
             cmd.run();
         } break;
 
