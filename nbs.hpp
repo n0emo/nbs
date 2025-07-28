@@ -45,6 +45,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #else
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -440,7 +442,7 @@ void Process::await() const
         if (WIFEXITED(status))
         {
             int exit_status = WEXITSTATUS(status);
-            if (exit_status == 0) return err::Ok();
+            if (exit_status == 0) return;
             // TODO: Error
             else throw PROCESS_EXIT_STATUS_ERROR;
         }
@@ -562,6 +564,7 @@ Process Cmd::run_async() const
         execvp(args[0], args.get());
         throw PROCESS_EXEC_ERROR;
     }
+    return p;
 #endif
 }
 
@@ -640,20 +643,26 @@ NBSAPI bool make_directory_if_not_exists(const path &path)
     CreateDirectory(path.buf.c_str(), NULL);
     return true;
 #else
-    #error "rename for POSIX is not implemented"
+    if (exists(path)) {
+        return true;
+    }
+
+    return mkdir(path.buf.c_str(), 0777) == 0;
 #endif
 }
 
 NBSAPI bool exists(const path &path)
 {
-    return GetFileAttributesA(path.buf.c_str()) != INVALID_FILE_ATTRIBUTES;
+    struct stat st = {0};
+    return stat(path.buf.c_str(), &st) == 0;
 }
 
 NBSAPI void rename(const os::path &from, const path &to) {
 #if _WIN32
     MoveFileEx(from.buf.c_str(), to.buf.c_str(), MOVEFILE_REPLACE_EXISTING);
 #else
-    #error "rename for POSIX is not implemented"
+    // TODO: Error handling
+    rename(from.buf.c_str(), to.buf.c_str());
 #endif
 }
 
@@ -679,9 +688,10 @@ NBSAPI long last_write_time(const os::path &path) {
     CloseHandle(hfile);
     return val;
 #else
-    #error "last_write_time for POSIX is not implemented"
+    struct stat st = {0};
+    stat(path.buf.c_str(), &st);
+    return st.st_atimespec.tv_sec;
 #endif
-    return false;
 }
 } // namespace os
 
