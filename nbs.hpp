@@ -289,8 +289,17 @@ struct CompileOptions
 NBSAPI std::string comp_str(Compiler comp);
 NBSAPI Compiler current_compiler();
 
-} // namespace c
-}; // namespace nbs
+}; // namespace c
+
+namespace wget {
+enum class WgetBackend {
+    Wget,
+    Curl,
+    PowerShell,
+};
+
+void make_available(const os::path &path, const std::string &url, WgetBackend backend = WgetBackend::Curl);
+}; // namespace wget
 
 namespace vcpkg
 {
@@ -315,6 +324,7 @@ struct Vcpkg {
     void install() const;
 };
 }; // namespace vcpkg
+}; // namespace nbs
 
 // -------------------------------
 //
@@ -1046,8 +1056,7 @@ bool TargetMap::needs_rebuild(const os::path &output) const
 }
 } // namespace target
 
-namespace c
-{
+namespace c {
 static CDefaults cdefaults;
 
 NBSAPI std::string comp_str(Compiler comp)
@@ -1153,10 +1162,29 @@ os::Cmd CompileOptions::obj_cmd(const os::path &output, const os::path &source) 
     return this->cmd({source}, additional_flags);
 }
 } // namespace c
-} // namespace nbs
 
-namespace vcpkg
-{
+namespace wget {
+void make_available(const os::path &path, const std::string &url, WgetBackend backend) {
+    if (exists(path)) return;
+
+    switch (backend) {
+        case WgetBackend::Wget: {
+            TODO("download with Curl");
+        } break;
+
+        case WgetBackend::Curl: {
+            auto cmd = os::Cmd({"curl", url, "-o", path.buf});
+            cmd.run();
+        } break;
+
+        case WgetBackend::PowerShell: {
+            TODO("download with PowerShell");
+        } break;
+    }
+}
+} // namespace wget
+
+namespace vcpkg {
 std::string TargetTriplet::to_string() const {
     return triplet;
 }
@@ -1189,6 +1217,8 @@ void Vcpkg::install() const {
         "--vcpkg-root=" + root.buf,
     }).run();
 }
-}
+} // namespace vcpkg
+} // namespace nbs
+
 #endif // NBS_IMPLEMENTATION
 #endif // NBS_HPP
