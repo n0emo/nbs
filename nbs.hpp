@@ -283,7 +283,7 @@ struct CompileOptions
     os::Cmd cmd(const os::pathvec &sources, const strvec &additional_flags = {}) const;
     os::Cmd exe_cmd(const os::path &output, const os::pathvec &sources) const;
     os::Cmd obj_cmd(const os::path &output, const os::path &source) const;
-    os::Cmd static_lib_cmd(const os::pathvec &sources) const;  // TODO
+    os::Cmd static_lib_cmd(const os::path &output, const os::pathvec &sources) const;
     os::Cmd dynamic_lib_cmd(const os::pathvec &sources) const; // TODO
 };
 
@@ -1119,13 +1119,14 @@ os::Cmd CompileOptions::cmd(const os::pathvec &sources, const strvec &additional
     if (!standard.empty())
         cmd.append("-std=" + standard);
 
-    cmd.append_many(os::paths_to_strs(sources));
     cmd.append_many(additional_flags);
 
     cmd.append_many(flags);
     cmd.append_many_prefixed("-I", os::paths_to_strs(include_paths));
     cmd.append_many_prefixed("-D", defines);
     cmd.append_many(other_flags);
+
+    cmd.append_many(os::paths_to_strs(sources));
 
     cmd.append_many_prefixed("-L", os::paths_to_strs(lib_paths));
     cmd.append_many_prefixed("-l", os::paths_to_strs(libs));
@@ -1163,6 +1164,13 @@ os::Cmd CompileOptions::obj_cmd(const os::path &output, const os::path &source) 
         additional_flags.emplace_back(output.buf);
     }
     return this->cmd({source}, additional_flags);
+}
+
+os::Cmd CompileOptions::static_lib_cmd(const os::path &output, const os::pathvec &objects) const
+{
+    os::Cmd cmd({"ar", "r", output.buf});
+    cmd.append_many(os::paths_to_strs(objects));
+    return cmd;
 }
 } // namespace c
 
