@@ -57,7 +57,10 @@
 	#define NBS_THROW(E) abort()
 #endif
 
-#define NBSAPI static inline
+#ifndef NBSAPI
+#define NBSAPI
+#endif
+
 #define TODO(thing) assert(0 && thing "is not implemented.")
 
 // TODO: multiprocessed target building
@@ -664,7 +667,7 @@ NBSAPI bool make_directory_if_not_exists(const path &path)
 
 NBSAPI bool exists(const path &path)
 {
-    struct stat st = {0};
+    struct stat st{};
     return stat(path.buf.c_str(), &st) == 0;
 }
 
@@ -674,6 +677,7 @@ NBSAPI void rename(const os::path &from, const path &to) {
 #else
     // TODO: Error handling
     int ret = std::rename(from.buf.c_str(), to.buf.c_str());
+    if (ret != 0) throw "Could not rename directory";
 #endif
 }
 
@@ -699,7 +703,7 @@ NBSAPI long last_write_time(const os::path &path) {
     CloseHandle(hfile);
     return val;
 #else
-    struct stat st = {0};
+    struct stat st{};
     stat(path.buf.c_str(), &st);
     return st.st_ctimespec.tv_sec;
 #endif
@@ -870,7 +874,7 @@ NBSAPI std::vector<std::vector<T>> topological_levels(
         {
         }
         Vertex(const T &name, const Edges<T> &edges, ptrdiff_t level, bool has_level)
-            : name(name), edges(edges), level(level), has_level(false), traversing(false)
+            : name(name), edges(edges), level(level), has_level(has_level), traversing(false)
         {
         }
     };
